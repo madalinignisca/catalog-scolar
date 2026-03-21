@@ -1,0 +1,15 @@
+[allowlist]
+description = "CatalogRO global allowlist"
+paths = [
+  '''api/db/seed\.sql''',
+  '''docs/''',
+]
+regexTarget = "match"
+regexes = [
+  # Localhost dev database URLs (not real credentials)
+  '''postgres://catalogro:catalogro@localhost''',
+  # Docker compose / Makefile dev defaults
+  '''POSTGRES_PASSWORD.*catalogro''',
+  # MinIO dev defaults
+  '''minioadmin''',
+]
