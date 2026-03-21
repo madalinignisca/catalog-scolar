@@ -9,18 +9,18 @@ import (
 type ImportFormat string
 
 const (
-	FormatSIIIR    ImportFormat = "siiir"
+	FormatSIIIR     ImportFormat = "siiir"
 	FormatOneRoster ImportFormat = "oneroster"
-	FormatCSV      ImportFormat = "csv"
+	FormatCSV       ImportFormat = "csv"
 )
 
 // ImportPreview is the result of parsing a file before confirmation.
 type ImportPreview struct {
-	Format      ImportFormat       `json:"format"`
-	Students    int                `json:"students"`
-	Teachers    int                `json:"teachers"`
-	Classes     int                `json:"classes"`
-	Warnings    []string           `json:"warnings,omitempty"`
+	Format      ImportFormat        `json:"format"`
+	Students    int                 `json:"students"`
+	Teachers    int                 `json:"teachers"`
+	Classes     int                 `json:"classes"`
+	Warnings    []string            `json:"warnings,omitempty"`
 	RawEntities []map[string]string `json:"-"` // held in memory until confirmed
 }
 

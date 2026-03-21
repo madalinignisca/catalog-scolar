@@ -161,13 +161,13 @@ func run() error {
 			r.Post("/reports/isj-export", notImplemented)
 
 			// Interoperability (import/export)
-			r.Post("/interop/import", notImplemented)                             // upload CSV, auto-detect format
-			r.Post("/interop/import/{importId}/confirm", notImplemented)          // confirm after preview
+			r.Post("/interop/import", notImplemented)                    // upload CSV, auto-detect format
+			r.Post("/interop/import/{importId}/confirm", notImplemented) // confirm after preview
 			r.Get("/interop/import/{importId}/status", notImplemented)
-			r.Post("/interop/export/siiir", notImplemented)                       // export SIIIR format for ISJ
-			r.Post("/interop/portability/export/{studentId}", notImplemented)     // student record package (EHEIF)
-			r.Post("/interop/portability/import", notImplemented)                 // import transferred student
-			r.Get("/interop/source-mappings", notImplemented)                     // list entity ↔ external ID mappings
+			r.Post("/interop/export/siiir", notImplemented)                   // export SIIIR format for ISJ
+			r.Post("/interop/portability/export/{studentId}", notImplemented) // student record package (EHEIF)
+			r.Post("/interop/portability/import", notImplemented)             // import transferred student
+			r.Get("/interop/source-mappings", notImplemented)                 // list entity ↔ external ID mappings
 		})
 
 		// OneRoster 1.2 API (separate auth: API key for machine-to-machine)

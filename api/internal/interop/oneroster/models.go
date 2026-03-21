@@ -45,12 +45,12 @@ type GUIDRef struct {
 
 // Org represents a school or district.
 type Org struct {
-	SourcedID  string    `json:"sourcedId"`
-	Status     Status    `json:"status"`
-	Name       string    `json:"name"`
-	Type       OrgType   `json:"type"`
-	Identifier string    `json:"identifier,omitempty"` // SIIIR code
-	Parent     *GUIDRef  `json:"parent,omitempty"`     // district for schools
+	SourcedID  string   `json:"sourcedId"`
+	Status     Status   `json:"status"`
+	Name       string   `json:"name"`
+	Type       OrgType  `json:"type"`
+	Identifier string   `json:"identifier,omitempty"` // SIIIR code
+	Parent     *GUIDRef `json:"parent,omitempty"`     // district for schools
 }
 
 // User represents a student, teacher, or guardian.
@@ -68,23 +68,23 @@ type User struct {
 
 // AcademicSession represents a school year or semester.
 type AcademicSession struct {
-	SourcedID string      `json:"sourcedId"`
-	Status    Status      `json:"status"`
-	Title     string      `json:"title"`
-	Type      SessionType `json:"type"`
-	StartDate string      `json:"startDate"` // ISO 8601 date
-	EndDate   string      `json:"endDate"`
-	Parent    *GUIDRef    `json:"parent,omitempty"` // schoolYear for terms
-	SchoolYear string    `json:"schoolYear"`
+	SourcedID  string      `json:"sourcedId"`
+	Status     Status      `json:"status"`
+	Title      string      `json:"title"`
+	Type       SessionType `json:"type"`
+	StartDate  string      `json:"startDate"` // ISO 8601 date
+	EndDate    string      `json:"endDate"`
+	Parent     *GUIDRef    `json:"parent,omitempty"` // schoolYear for terms
+	SchoolYear string      `json:"schoolYear"`
 }
 
 // Course represents a subject/discipline.
 type Course struct {
-	SourcedID string   `json:"sourcedId"`
-	Status    Status   `json:"status"`
-	Title     string   `json:"title"`
+	SourcedID  string  `json:"sourcedId"`
+	Status     Status  `json:"status"`
+	Title      string  `json:"title"`
 	CourseCode string  `json:"courseCode,omitempty"`
-	Org       GUIDRef  `json:"org"` // school
+	Org        GUIDRef `json:"org"` // school
 }
 
 // Class represents a class/group.
@@ -111,28 +111,28 @@ type Enrollment struct {
 
 // LineItem represents a gradable item (e.g., a subject in a semester).
 type LineItem struct {
-	SourcedID    string   `json:"sourcedId"`
-	Status       Status   `json:"status"`
-	Title        string   `json:"title"`
-	Category     string   `json:"category"` // "term", "thesis", "final"
-	AssignDate   string   `json:"assignDate"`
-	DueDate      string   `json:"dueDate"`
-	Class        GUIDRef  `json:"class"`
-	GradingPeriod GUIDRef `json:"gradingPeriod"`
+	SourcedID      string  `json:"sourcedId"`
+	Status         Status  `json:"status"`
+	Title          string  `json:"title"`
+	Category       string  `json:"category"` // "term", "thesis", "final"
+	AssignDate     string  `json:"assignDate"`
+	DueDate        string  `json:"dueDate"`
+	Class          GUIDRef `json:"class"`
+	GradingPeriod  GUIDRef `json:"gradingPeriod"`
 	ResultValueMin float64 `json:"resultValueMin"`
 	ResultValueMax float64 `json:"resultValueMax"`
 }
 
 // Result represents a grade/score for a student on a line item.
 type Result struct {
-	SourcedID  string  `json:"sourcedId"`
-	Status     Status  `json:"status"`
-	Student    GUIDRef `json:"student"`
-	LineItem   GUIDRef `json:"lineItem"`
-	Score      float64 `json:"score"`
-	ScoreDate  string  `json:"scoreDate"`
-	Comment    string  `json:"comment,omitempty"`
-	ScoreStatus string `json:"scoreStatus"` // "fully graded", "partially graded", "exempt"
+	SourcedID   string  `json:"sourcedId"`
+	Status      Status  `json:"status"`
+	Student     GUIDRef `json:"student"`
+	LineItem    GUIDRef `json:"lineItem"`
+	Score       float64 `json:"score"`
+	ScoreDate   string  `json:"scoreDate"`
+	Comment     string  `json:"comment,omitempty"`
+	ScoreStatus string  `json:"scoreStatus"` // "fully graded", "partially graded", "exempt"
 }
 
 // CollectionResponse wraps a list of entities in OneRoster JSON format.
