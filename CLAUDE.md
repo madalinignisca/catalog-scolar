@@ -2,6 +2,8 @@
 
 Digital school catalog platform for Romanian primary, middle, and high schools.
 
+**Product spec:** See [SPECS.md](SPECS.md) for the full technical plan (Romanian) — schema design, API contracts, auth flows, interop architecture, and implementation timeline.
+
 ## Stack
 
 - **API:** Go 1.24, chi router, sqlc, goose migrations, River jobs
