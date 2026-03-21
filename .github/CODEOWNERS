@@ -1,0 +1,16 @@
+# Code owners - require review for critical paths
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Database migrations require careful review (schema changes, RLS policies)
+/api/db/migrations/ @madalinignisca
+
+# Security-sensitive files
+/.semgrep.yml @madalinignisca
+/.gitleaks.toml @madalinignisca
+/api/.golangci.yml @madalinignisca
+
+# CI/CD pipelines
+/.github/workflows/ @madalinignisca
+
+# Helm charts (infrastructure changes)
+/helm/ @madalinignisca
