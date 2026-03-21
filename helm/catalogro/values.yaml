@@ -1,0 +1,67 @@
+# Default values for CatalogRO
+
+api:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/vlahsh/catalogro-api
+    tag: "latest"  # overridden per deploy with git SHA (e.g. a1b2c3d)
+    pullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: ghcr-credentials  # kubectl create secret docker-registry ghcr-credentials ...
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  env:
+    ENV: production
+    PORT: "8080"
+  service:
+    port: 8080
+
+web:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/vlahsh/catalogro-web
+    tag: "latest"  # overridden per deploy with git SHA
+    pullPolicy: IfNotPresent
+  imagePullSecrets:
+    - name: ghcr-credentials
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    port: 3000
+
+ingress:
+  enabled: true
+  className: traefik
+  host: app.catalogro.ro
+  tls:
+    enabled: true
+    secretName: catalogro-tls
+
+postgresql:
+  # External managed PG — connection via secret
+  external: true
+  secretName: catalogro-db-credentials
+
+redis:
+  # External managed Redis — connection via secret
+  external: true
+  secretName: catalogro-redis-credentials
+
+backup:
+  enabled: true
+  schedule: "0 3 * * *"  # daily at 3 AM
+  retention: "2555"       # 7 years (school archive requirement)
+
+siiirSync:
+  enabled: false
+  schedule: "0 6 * * 1"  # weekly Monday 6 AM

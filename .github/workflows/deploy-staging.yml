@@ -1,0 +1,51 @@
+name: Deploy Staging
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+env:
+  HELM_RELEASE: catalogro-staging
+  NAMESPACE: catalogro-staging
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/catalogro-api
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/catalogro-web
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install ${{ env.HELM_RELEASE }} ./helm/catalogro \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --set api.image.tag=${{ steps.sha.outputs.short }} \
+            --set web.image.tag=${{ steps.sha.outputs.short }} \
+            --values ./helm/catalogro/values-staging.yaml \
+            --wait \
+            --timeout 5m
+
+      - name: Verify deployment
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.HELM_RELEASE }}-api --timeout=120s
+          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.HELM_RELEASE }}-web --timeout=120s

@@ -1,0 +1,54 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:17-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  pg_dump "$DATABASE_URL" | gzip > /tmp/backup-$(date +%Y%m%d-%H%M%S).sql.gz
+                  # TODO: upload to MinIO/S3
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.secretName }}
+                      key: url
+{{- end }}
+---
+{{- if .Values.siiirSync.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-siiir-sync
+spec:
+  schedule: {{ .Values.siiirSync.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: siiir-sync
+              image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}"
+              command: ["/catalogro-api", "--job=siiir-sync"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.postgresql.secretName }}
+                      key: url
+{{- end }}

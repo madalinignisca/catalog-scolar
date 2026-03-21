@@ -1,0 +1,20 @@
+# Staging overrides
+
+api:
+  replicaCount: 1
+  env:
+    ENV: staging
+
+web:
+  replicaCount: 1
+
+ingress:
+  host: staging.catalogro.ro
+  tls:
+    secretName: catalogro-staging-tls
+
+backup:
+  enabled: false
+
+siiirSync:
+  enabled: false

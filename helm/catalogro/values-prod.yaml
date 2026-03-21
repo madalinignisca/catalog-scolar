@@ -1,0 +1,36 @@
+# Production overrides
+
+api:
+  replicaCount: 2
+  env:
+    ENV: production
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+web:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+ingress:
+  host: app.catalogro.ro
+  tls:
+    secretName: catalogro-prod-tls
+
+backup:
+  enabled: true
+  schedule: "0 3 * * *"
+  retention: "2555"
+
+siiirSync:
+  enabled: false  # enable when SIIIR API integration is ready

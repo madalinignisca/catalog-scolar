@@ -1,0 +1,63 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (git SHA short, e.g. a1b2c3d)"
+        required: true
+        type: string
+
+env:
+  HELM_RELEASE: catalogro-prod
+  NAMESPACE: catalogro-prod
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/catalogro-api
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/catalogro-web
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify images exist in GHCR
+        run: |
+          echo "Verifying API image: ${{ env.API_IMAGE }}:${{ inputs.image_tag }}"
+          docker manifest inspect ${{ env.API_IMAGE }}:${{ inputs.image_tag }} > /dev/null
+          echo "Verifying Web image: ${{ env.WEB_IMAGE }}:${{ inputs.image_tag }}"
+          docker manifest inspect ${{ env.WEB_IMAGE }}:${{ inputs.image_tag }} > /dev/null
+        env:
+          DOCKER_CLI_EXPERIMENTAL: enabled
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install ${{ env.HELM_RELEASE }} ./helm/catalogro \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --set api.image.tag=${{ inputs.image_tag }} \
+            --set web.image.tag=${{ inputs.image_tag }} \
+            --values ./helm/catalogro/values-prod.yaml \
+            --wait \
+            --timeout 5m
+
+      - name: Verify deployment
+        run: |
+          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.HELM_RELEASE }}-api --timeout=180s
+          kubectl -n ${{ env.NAMESPACE }} rollout status deployment/${{ env.HELM_RELEASE }}-web --timeout=180s
+
+      - name: Smoke test
+        run: |
+          API_URL=$(kubectl -n ${{ env.NAMESPACE }} get ingress -o jsonpath='{.items[0].spec.rules[0].host}')
+          curl -sf "https://${API_URL}/healthz" || exit 1
+          echo "Production healthy."
