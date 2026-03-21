@@ -416,9 +416,11 @@ CREATE INDEX idx_refresh_user ON refresh_tokens(user_id);
 -- ============================================================
 -- RLS helper
 -- ============================================================
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION current_school_id() RETURNS UUID AS $$
     SELECT current_setting('app.current_school_id', true)::uuid;
 $$ LANGUAGE sql STABLE;
+-- +goose StatementEnd
 
 -- ============================================================
 -- ROW-LEVEL SECURITY — enable on all tenant tables
@@ -477,6 +479,7 @@ CREATE POLICY source_mappings_tenant ON source_mappings USING (school_id = curre
 -- ============================================================
 -- App role (non-superuser, respects RLS)
 -- ============================================================
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'catalogro_app') THEN
@@ -484,6 +487,7 @@ BEGIN
     END IF;
 END
 $$;
+-- +goose StatementEnd
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO catalogro_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO catalogro_app;

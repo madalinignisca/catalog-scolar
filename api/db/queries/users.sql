@@ -53,6 +53,12 @@ SELECT u.* FROM users u
 JOIN parent_student_links psl ON psl.student_id = u.id
 WHERE psl.parent_id = $1;
 
+-- name: GetUserByEmailForLogin :one
+-- Finds a user by email for login purposes. This query does NOT use RLS because
+-- at login time we have no school_id context yet — the user hasn't authenticated.
+-- We filter by is_active to prevent disabled accounts from logging in.
+SELECT * FROM users WHERE email = $1 AND is_active = true;
+
 -- name: LinkParentStudent :exec
 INSERT INTO parent_student_links (school_id, parent_id, student_id, relationship, is_primary)
 VALUES (current_school_id(), $1, $2, $3, $4);

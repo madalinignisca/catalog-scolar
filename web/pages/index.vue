@@ -1,102 +1,253 @@
-<script setup lang="ts">
-const { user, isAuthenticated, logout } = useAuth();
-const { isOnline, pendingMutations } = useOfflineSync();
+<!--
+  index.vue — Role-based dashboard (home page).
 
-// Redirect to login if not authenticated
+  This is the main landing page after login. What the user sees depends
+  on their role:
+
+  - **Teacher**: a grid of class cards, each showing class name, education
+    level, student count, and assigned subjects. Clicking a card navigates
+    to the catalog page for that class (/catalog/{classId}).
+
+  - **Admin**: quick-access cards for school administration (users, classes,
+    reports). These link to admin pages (built separately).
+
+  - **Parent**: placeholder for future "my children" view.
+
+  - **Other roles**: a simple welcome message.
+
+  If the user is not authenticated, they are redirected to /login.
+
+  This page uses the default layout (sidebar + top bar) which is
+  automatically applied by Nuxt since no `definePageMeta({ layout: false })`
+  is set.
+-->
+
+<script setup lang="ts">
+import type { TeacherClass } from '~/composables/useCatalog';
+
+/**
+ * Get the current user from the auth composable.
+ * The `user` ref contains the logged-in user's profile (name, role, etc.).
+ * `isAuthenticated` is a computed boolean for quick auth checks.
+ */
+const { user, isAuthenticated } = useAuth();
+
+/**
+ * Get catalog functions to fetch the teacher's class list.
+ * `classes` is a reactive ref that holds the fetched TeacherClass array.
+ * `fetchClasses` calls GET /classes and populates the ref.
+ */
+const { classes, fetchClasses, isLoading, error } = useCatalog();
+
+/**
+ * Redirect to login if the user is not authenticated.
+ * This check runs on the client side only (SSR has no localStorage).
+ */
 if (import.meta.client && !isAuthenticated.value) {
   void navigateTo('/login');
+}
+
+/**
+ * On mount: if the user is a teacher, fetch their assigned classes.
+ * Other roles don't need this data on the dashboard.
+ */
+onMounted(async () => {
+  if (user.value?.role === 'teacher') {
+    await fetchClasses();
+  }
+});
+
+/**
+ * Map education levels to human-readable Romanian labels.
+ * Used to display on the class cards so teachers know the grading system.
+ */
+const educationLevelLabels: Record<string, string> = {
+  primary: 'Primar (P-IV)',
+  middle: 'Gimnaziu (V-VIII)',
+  high: 'Liceu (IX-XII)',
+};
+
+/**
+ * Navigate to the catalog page for a specific class.
+ * The catalog page shows the grade grid for the class.
+ *
+ * @param classItem - The class to navigate to
+ */
+function openClass(classItem: TeacherClass): void {
+  void navigateTo(`/catalog/${classItem.id}`);
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <!-- Top bar -->
-    <header class="border-b border-gray-200 bg-white shadow-sm">
-      <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-        <div class="flex items-center gap-3">
-          <h1 class="text-lg font-bold text-gray-900">CatalogRO</h1>
-          <!-- Sync status -->
-          <span
-            :class="[
-              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
-              isOnline ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700',
-            ]"
-          >
+  <!-- ================================================================== -->
+  <!-- TEACHER DASHBOARD                                                  -->
+  <!-- Shows a grid of class cards when the user is a teacher.            -->
+  <!-- ================================================================== -->
+  <div v-if="user?.role === 'teacher'" class="space-y-6">
+    <!-- Page heading -->
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Tablou de bord</h1>
+      <p class="mt-1 text-sm text-gray-500">Clasele la care predați în anul școlar curent</p>
+    </div>
+
+    <!-- Error banner: shown if the class list failed to load -->
+    <div
+      v-if="error !== null && error !== ''"
+      class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+    >
+      {{ error }}
+    </div>
+
+    <!-- Loading state: skeleton cards while fetching -->
+    <div v-if="isLoading" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        v-for="n in 3"
+        :key="n"
+        class="animate-pulse rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+      >
+        <div class="mb-3 h-5 w-24 rounded bg-gray-200" />
+        <div class="mb-2 h-4 w-32 rounded bg-gray-100" />
+        <div class="h-4 w-20 rounded bg-gray-100" />
+      </div>
+    </div>
+
+    <!-- Empty state: no classes assigned to this teacher -->
+    <div
+      v-else-if="classes.length === 0 && error === null"
+      class="rounded-xl border-2 border-dashed border-gray-300 p-12 text-center"
+    >
+      <svg
+        class="mx-auto h-12 w-12 text-gray-400"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        stroke-width="1"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+        />
+      </svg>
+      <h3 class="mt-4 text-sm font-semibold text-gray-900">Nicio clasă asignată</h3>
+      <p class="mt-1 text-sm text-gray-500">
+        Contactați secretariatul pentru a fi repartizat la clase.
+      </p>
+    </div>
+
+    <!-- Class cards grid: one card per assigned class -->
+    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <button
+        v-for="classItem in classes"
+        :key="classItem.id"
+        type="button"
+        class="group rounded-xl border border-gray-200 bg-white p-6 text-left shadow-sm transition-all hover:border-blue-300 hover:shadow-md"
+        @click="openClass(classItem)"
+      >
+        <!-- Class name and education level badge -->
+        <div class="flex items-start justify-between">
+          <h3 class="text-lg font-semibold text-gray-900 group-hover:text-blue-700">
+            Clasa {{ classItem.name }}
+          </h3>
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            {{ educationLevelLabels[classItem.educationLevel] ?? classItem.educationLevel }}
+          </span>
+        </div>
+
+        <!-- Student count -->
+        <p class="mt-2 text-sm text-gray-500">
+          <span class="font-medium text-gray-700">{{ classItem.studentCount }}</span>
+          {{ classItem.studentCount === 1 ? 'elev' : 'elevi' }}
+        </p>
+
+        <!-- Subjects the teacher teaches in this class -->
+        <div v-if="classItem.subjects.length > 0" class="mt-3">
+          <p class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Materii</p>
+          <div class="flex flex-wrap gap-1.5">
             <span
-              :class="['h-1.5 w-1.5 rounded-full', isOnline ? 'bg-green-500' : 'bg-yellow-500']"
-            />
-            {{ isOnline ? 'Online' : 'Offline' }}
-            <template v-if="pendingMutations > 0">
-              · {{ pendingMutations }} nesincronizate
-            </template>
-          </span>
-        </div>
-
-        <div class="flex items-center gap-4">
-          <span v-if="user" class="text-sm text-gray-600">
-            {{ user.firstName }} {{ user.lastName }}
-            <span class="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
-              {{ user.role }}
+              v-for="subject in classItem.subjects"
+              :key="subject.id"
+              class="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+            >
+              {{ subject.shortName ?? subject.name }}
             </span>
-          </span>
-          <button
-            class="text-sm text-gray-500 hover:text-gray-700"
-            @click="logout().then(() => navigateTo('/login'))"
-          >
-            Ieșire
-          </button>
+          </div>
         </div>
-      </div>
-    </header>
 
-    <!-- Content -->
-    <main class="mx-auto max-w-7xl px-4 py-8">
-      <!-- Teacher dashboard -->
-      <div v-if="user?.role === 'teacher'" class="space-y-6">
-        <h2 class="text-xl font-semibold text-gray-900">Clasele mele</h2>
-        <p class="text-gray-500">Încărcare clase...</p>
-        <!-- TODO: fetch and display teacher's classes -->
-      </div>
-
-      <!-- Parent dashboard -->
-      <div v-else-if="user?.role === 'parent'" class="space-y-6">
-        <h2 class="text-xl font-semibold text-gray-900">Copiii mei</h2>
-        <p class="text-gray-500">Încărcare date...</p>
-        <!-- TODO: fetch and display children -->
-      </div>
-
-      <!-- Admin dashboard -->
-      <div v-else-if="user?.role === 'admin'" class="space-y-6">
-        <h2 class="text-xl font-semibold text-gray-900">Administrare școală</h2>
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <NuxtLink
-            to="/admin/users"
-            class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md"
+        <!-- Visual indicator to show this is clickable -->
+        <div
+          class="mt-4 flex items-center text-xs font-medium text-blue-600 opacity-0 transition-opacity group-hover:opacity-100"
+        >
+          Deschide catalogul
+          <svg
+            class="ml-1 h-3 w-3"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
           >
-            <h3 class="font-semibold text-gray-900">Utilizatori</h3>
-            <p class="mt-1 text-sm text-gray-500">Provizionare conturi, activări în așteptare</p>
-          </NuxtLink>
-          <NuxtLink
-            to="/admin/classes"
-            class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md"
-          >
-            <h3 class="font-semibold text-gray-900">Clase &amp; Materii</h3>
-            <p class="mt-1 text-sm text-gray-500">Încadrare, formațiuni de studiu</p>
-          </NuxtLink>
-          <NuxtLink
-            to="/reports"
-            class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md"
-          >
-            <h3 class="font-semibold text-gray-900">Rapoarte</h3>
-            <p class="mt-1 text-sm text-gray-500">Dashboard, statistici, export ISJ</p>
-          </NuxtLink>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
         </div>
-      </div>
+      </button>
+    </div>
+  </div>
 
-      <!-- Fallback -->
-      <div v-else class="text-center text-gray-500">
-        <p>Bine ai venit în CatalogRO</p>
-      </div>
-    </main>
+  <!-- ================================================================== -->
+  <!-- ADMIN DASHBOARD                                                    -->
+  <!-- Quick-access cards for school administration features.             -->
+  <!-- ================================================================== -->
+  <div v-else-if="user?.role === 'admin'" class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Administrare școală</h1>
+      <p class="mt-1 text-sm text-gray-500">Gestionați utilizatori, clase și configurări</p>
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <!-- Users management card -->
+      <NuxtLink
+        to="/admin/users"
+        class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+      >
+        <h3 class="font-semibold text-gray-900">Utilizatori</h3>
+        <p class="mt-1 text-sm text-gray-500">Provizionare conturi, activări în așteptare</p>
+      </NuxtLink>
+
+      <!-- Classes management card -->
+      <NuxtLink
+        to="/admin/classes"
+        class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+      >
+        <h3 class="font-semibold text-gray-900">Clase &amp; Materii</h3>
+        <p class="mt-1 text-sm text-gray-500">Încadrare, formațiuni de studiu</p>
+      </NuxtLink>
+
+      <!-- Reports card -->
+      <NuxtLink
+        to="/reports"
+        class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+      >
+        <h3 class="font-semibold text-gray-900">Rapoarte</h3>
+        <p class="mt-1 text-sm text-gray-500">Dashboard, statistici, export ISJ</p>
+      </NuxtLink>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- PARENT DASHBOARD (placeholder for future implementation)           -->
+  <!-- ================================================================== -->
+  <div v-else-if="user?.role === 'parent'" class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Copiii mei</h1>
+      <p class="mt-1 text-sm text-gray-500">Vizualizați situația școlară a copiilor</p>
+    </div>
+    <p class="text-gray-500">Încărcare date...</p>
+  </div>
+
+  <!-- ================================================================== -->
+  <!-- FALLBACK: unknown or unhandled role                                -->
+  <!-- ================================================================== -->
+  <div v-else class="py-12 text-center text-gray-500">
+    <p>Bine ați venit în CatalogRO</p>
   </div>
 </template>
