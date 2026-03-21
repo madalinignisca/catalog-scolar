@@ -1,4 +1,4 @@
-.PHONY: dev dev-api dev-web test test-api test-web lint lint-api lint-web \
+.PHONY: dev dev-api dev-web test test-api test-web test-e2e test-all lint lint-api lint-web \
 	migrate migrate-down migrate-status sqlc seed build clean help \
 	check security fix hooks-install
 
@@ -54,6 +54,11 @@ test-api: ## Run Go tests
 
 test-web: ## Run Nuxt tests
 	cd web && npm run test
+
+test-e2e: ## Run Playwright E2E tests (requires make dev running)
+	cd web && npx playwright test
+
+test-all: test-api test-web test-e2e ## Run ALL tests including E2E
 
 # ── Linting ─────────────────────────────────────────────────
 lint: lint-api lint-web ## Run all linters
@@ -120,7 +125,7 @@ redis-cli: ## Open redis-cli
 	redis-cli
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help
