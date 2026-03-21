@@ -1,0 +1,82 @@
+repos:
+  # 1. Secret detection (fastest, fail-first)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: ['--config', '.gitleaks.toml']
+
+  # 2. EditorConfig compliance
+  - repo: https://github.com/editorconfig-checker/editorconfig-checker
+    rev: v3.6.1
+    hooks:
+      - id: editorconfig-checker
+        exclude: '(\.git/|node_modules/|\.nuxt/|\.output/|bin/|\.png$|\.ico$|\.woff2?$|docs/|api/db/seed\.sql$)'
+
+  # 3. Dockerfile linting (uses local binary installed in Task 1)
+  - repo: local
+    hooks:
+      - id: hadolint
+        name: hadolint
+        entry: hadolint
+        language: system
+        types: [dockerfile]
+
+  # 4-10. Local hooks (project-specific tools)
+  - repo: local
+    hooks:
+      # 4. Prettier (formatting before logic checks)
+      - id: prettier
+        name: prettier
+        entry: bash -c 'cd web && npx prettier --check --ignore-unknown'
+        language: system
+        files: '^web/.*\.(ts|vue|json|css)$'
+        pass_filenames: false
+
+      # 5. ESLint
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd web && npx eslint .'
+        language: system
+        files: '^web/.*\.(ts|vue)$'
+        pass_filenames: false
+
+      # 6. golangci-lint (needs full module context)
+      - id: golangci-lint
+        name: golangci-lint
+        entry: bash -c 'cd api && golangci-lint run ./...'
+        language: system
+        files: '^api/.*\.go$'
+        pass_filenames: false
+
+      # 7. Go vulnerability check (on go.mod or go.sum changes)
+      - id: govulncheck
+        name: govulncheck
+        entry: bash -c 'cd api && govulncheck ./...'
+        language: system
+        files: '^api/go\.(mod|sum)$'
+        pass_filenames: false
+
+      # 8. npm audit (only on lockfile changes)
+      - id: npm-audit
+        name: npm-audit
+        entry: bash -c 'cd web && npm audit --audit-level=high'
+        language: system
+        files: '^web/package-lock\.json$'
+        pass_filenames: false
+
+      # 9. Helm lint
+      - id: helm-lint
+        name: helm-lint
+        entry: helm lint helm/catalogro
+        language: system
+        files: '^helm/'
+        pass_filenames: false
+
+      # 10. Semgrep custom security rules
+      - id: semgrep
+        name: semgrep
+        entry: semgrep --config .semgrep.yml --error api/
+        language: system
+        files: '^api/.*\.go$'
+        pass_filenames: false

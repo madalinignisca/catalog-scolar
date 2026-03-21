@@ -10,7 +10,7 @@ SELECT u.*, s.name as school_name
 FROM users u
 JOIN schools s ON s.id = u.school_id
 WHERE u.activation_token = $1
-  AND u.activated_at IS NULL;
+    AND u.activated_at IS NULL;
 
 -- name: ListUsersBySchool :many
 SELECT * FROM users

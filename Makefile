@@ -1,6 +1,6 @@
 .PHONY: dev dev-api dev-web test test-api test-web lint lint-api lint-web \
-       migrate migrate-down migrate-status sqlc seed build clean help \
-       check security fix hooks-install
+	migrate migrate-down migrate-status sqlc seed build clean help \
+	check security fix hooks-install
 
 # ── Config ──────────────────────────────────────────────────
 DATABASE_URL ?= postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=disable

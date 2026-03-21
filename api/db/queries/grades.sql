@@ -3,10 +3,10 @@ SELECT g.*, u.first_name as student_first_name, u.last_name as student_last_name
 FROM grades g
 JOIN users u ON u.id = g.student_id
 WHERE g.class_id = $1
-  AND g.subject_id = $2
-  AND g.semester = $3
-  AND g.school_year_id = $4
-  AND g.deleted_at IS NULL
+    AND g.subject_id = $2
+    AND g.semester = $3
+    AND g.school_year_id = $4
+    AND g.deleted_at IS NULL
 ORDER BY u.last_name, u.first_name, g.grade_date;
 
 -- name: CreateGrade :one
@@ -37,14 +37,14 @@ SELECT * FROM grades WHERE client_id = $1 AND school_id = current_school_id();
 -- name: ListGradesModifiedSince :many
 SELECT * FROM grades
 WHERE updated_at > $1
-  AND class_id = ANY($2::uuid[])
+    AND class_id = ANY($2::uuid[])
 ORDER BY updated_at;
 
 -- name: CountGradesForAverage :one
 SELECT COUNT(*) FROM grades
 WHERE student_id = $1
-  AND subject_id = $2
-  AND school_year_id = $3
-  AND semester = $4
-  AND deleted_at IS NULL
-  AND is_thesis = false;
+    AND subject_id = $2
+    AND school_year_id = $3
+    AND semester = $4
+    AND deleted_at IS NULL
+    AND is_thesis = false;

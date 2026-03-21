@@ -3,7 +3,7 @@ SELECT a.*, u.first_name as student_first_name, u.last_name as student_last_name
 FROM absences a
 JOIN users u ON u.id = a.student_id
 WHERE a.class_id = $1
-  AND a.absence_date = $2
+    AND a.absence_date = $2
 ORDER BY a.period_number, u.last_name;
 
 -- name: ListAbsencesByStudentSemester :many
@@ -11,8 +11,8 @@ SELECT a.*, s.name as subject_name
 FROM absences a
 JOIN subjects s ON s.id = a.subject_id
 WHERE a.student_id = $1
-  AND a.school_year_id = $2
-  AND a.semester = $3
+    AND a.school_year_id = $2
+    AND a.semester = $3
 ORDER BY a.absence_date, a.period_number;
 
 -- name: CreateAbsence :one
@@ -38,9 +38,9 @@ RETURNING *;
 -- name: CountUnexcusedAbsences :one
 SELECT COUNT(*) FROM absences
 WHERE student_id = $1
-  AND school_year_id = $2
-  AND semester = $3
-  AND absence_type = 'unexcused';
+    AND school_year_id = $2
+    AND semester = $3
+    AND absence_type = 'unexcused';
 
 -- name: GetAbsenceByClientID :one
 SELECT * FROM absences WHERE client_id = $1 AND school_id = current_school_id();
@@ -48,5 +48,5 @@ SELECT * FROM absences WHERE client_id = $1 AND school_id = current_school_id();
 -- name: ListAbsencesModifiedSince :many
 SELECT * FROM absences
 WHERE updated_at > $1
-  AND class_id = ANY($2::uuid[])
+    AND class_id = ANY($2::uuid[])
 ORDER BY updated_at;

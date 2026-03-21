@@ -13,5 +13,5 @@ SELECT * FROM school_years WHERE school_id = current_school_id() AND is_current 
 -- name: GetEvaluationConfig :one
 SELECT * FROM evaluation_configs
 WHERE school_id = current_school_id()
-  AND education_level = $1
-  AND school_year_id = $2;
+    AND education_level = $1
+    AND school_year_id = $2;
