@@ -1,0 +1,178 @@
+rules:
+  - id: sql-string-concat
+    patterns:
+      - pattern-either:
+          - pattern: |
+              fmt.Sprintf("... SELECT ...", ...)
+          - pattern: |
+              fmt.Sprintf("... INSERT ...", ...)
+          - pattern: |
+              fmt.Sprintf("... UPDATE ...", ...)
+          - pattern: |
+              fmt.Sprintf("... DELETE ...", ...)
+          - pattern: |
+              fmt.Sprintf("... FROM ...", ...)
+          - pattern: |
+              $X + "... SELECT ..."
+          - pattern: |
+              $X + "... INSERT ..."
+          - pattern: |
+              $X + "... UPDATE ..."
+          - pattern: |
+              $X + "... DELETE ..."
+          - pattern: |
+              "... SELECT ..." + $X
+          - pattern: |
+              "... INSERT ..." + $X
+          - pattern: |
+              "... UPDATE ..." + $X
+          - pattern: |
+              "... DELETE ..." + $X
+    message: >
+      SQL query built with string concatenation or fmt.Sprintf. Use parameterized
+      queries (sqlc or pgx query parameters) to prevent SQL injection.
+    languages: [go]
+    severity: ERROR
+    paths:
+      include:
+        - api/
+      exclude:
+        - "*_test.go"
+
+  - id: hardcoded-school-id
+    pattern: |
+      $VAR = "........-....-....-....-............"
+    message: >
+      Hardcoded UUID that may be a school_id. Use configuration or context-based
+      tenant resolution instead.
+    languages: [go]
+    severity: WARNING
+    paths:
+      include:
+        - api/
+      exclude:
+        - "*_test.go"
+        - "api/db/seed.sql"
+
+  - id: jwt-secret-in-code
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $SECRET = "..."
+          - pattern: |
+              $SECRET := "..."
+      - metavariable-regex:
+          metavariable: $SECRET
+          regex: (?i)(jwt.?secret|totp.?key|totp.?secret|encryption.?key|signing.?key)
+    message: >
+      Secret value appears to be hardcoded. Load secrets from environment
+      variables or a secrets manager.
+    languages: [go]
+    severity: ERROR
+    paths:
+      include:
+        - api/
+      exclude:
+        - "*_test.go"
+        - "api/internal/config/*"
+
+  - id: insecure-crypto
+    pattern-either:
+      - pattern: |
+          import "crypto/md5"
+      - pattern: |
+          import "crypto/sha1"
+      - pattern: |
+          import "crypto/des"
+    message: >
+      Weak cryptographic primitive. Use crypto/sha256, crypto/sha512, or
+      crypto/aes for GDPR-compliant data handling.
+    languages: [go]
+    severity: ERROR
+    paths:
+      include:
+        - api/
+
+  - id: missing-rows-err-check
+    patterns:
+      - pattern: |
+          $ROWS, $ERR := $DB.Query(...)
+          ...
+          for $ROWS.Next() {
+            ...
+          }
+      - pattern-not: |
+          $ROWS, $ERR := $DB.Query(...)
+          ...
+          for $ROWS.Next() {
+            ...
+          }
+          ...
+          $ROWS.Err()
+    message: >
+      rows.Err() not checked after iteration. Database errors during iteration
+      are only reported via Err(). This can cause silent data loss.
+    languages: [go]
+    severity: WARNING
+    paths:
+      include:
+        - api/
+
+  - id: rls-missing-tenant-context
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $POOL.Query($CTX, ...)
+          - pattern: |
+              $POOL.Exec($CTX, ...)
+          - pattern: |
+              $POOL.QueryRow($CTX, ...)
+      - pattern-not-inside: |
+          func(...) {
+            ...
+            SetTenant(...)
+            ...
+          }
+    message: >
+      Database query without SetTenant() in the same function. Ensure RLS
+      tenant context is set (may be handled by middleware — add // nosemgrep
+      if so).
+    languages: [go]
+    severity: WARNING
+    paths:
+      include:
+        - api/
+      exclude:
+        - "*_test.go"
+        - "api/internal/platform/*"
+
+  - id: unvalidated-input-to-db
+    pattern-either:
+      - patterns:
+          - pattern: |
+              func $HANDLER($W http.ResponseWriter, $R *http.Request) {
+                ...
+                $BODY := $R.Body
+                ...
+                $DB.$METHOD($CTX, ..., $BODY, ...)
+              }
+      - patterns:
+          - pattern: |
+              func $HANDLER($W http.ResponseWriter, $R *http.Request) {
+                ...
+                $PARAM := $R.URL.Query().Get(...)
+                ...
+                $DB.$METHOD($CTX, ..., $PARAM, ...)
+              }
+    message: >
+      HTTP request data flows to database query without visible validation.
+      Validate and sanitize input before passing to queries. (Best-effort:
+      intra-function only — add // nosemgrep if validation happens in a
+      called function.)
+    languages: [go]
+    severity: WARNING
+    paths:
+      include:
+        - api/
+      exclude:
+        - "*_test.go"
