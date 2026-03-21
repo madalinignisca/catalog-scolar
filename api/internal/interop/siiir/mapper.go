@@ -9,11 +9,11 @@ import (
 // MappedUser represents an internal user ready to be persisted,
 // along with its source mapping for traceability.
 type MappedUser struct {
-	FirstName      string
-	LastName       string
-	Role           string // "student" or "teacher"
-	ClassName      string // for students: which class to enroll in
-	SourceMapping  SourceMapping
+	FirstName     string
+	LastName      string
+	Role          string // "student" or "teacher"
+	ClassName     string // for students: which class to enroll in
+	SourceMapping SourceMapping
 }
 
 // SourceMapping is the data for the source_mappings table.
@@ -39,7 +39,7 @@ func NewMapper() *Mapper {
 
 // MapStudent converts a parsed SIIIR student to an internal user + source mapping.
 // Returns an error if the student has invalid data.
-func (m *Mapper) MapStudent(s SIIIRStudent) (*MappedUser, error) {
+func (m *Mapper) MapStudent(s *Student) (*MappedUser, error) {
 	if s.LastName == "" || s.FirstName == "" {
 		return nil, fmt.Errorf("student missing name: %q %q", s.LastName, s.FirstName)
 	}
@@ -79,7 +79,7 @@ func (m *Mapper) MapStudent(s SIIIRStudent) (*MappedUser, error) {
 }
 
 // MapTeacher converts a parsed SIIIR teacher to an internal user + source mapping.
-func (m *Mapper) MapTeacher(t SIIIRTeacher) (*MappedUser, error) {
+func (m *Mapper) MapTeacher(t *Teacher) (*MappedUser, error) {
 	if t.LastName == "" || t.FirstName == "" {
 		return nil, fmt.Errorf("teacher missing name")
 	}
@@ -118,7 +118,7 @@ func normalizeName(s string) string {
 	// Handle compound names: "Ana-Maria", "Ana Maria"
 	parts := strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == '-' })
 	for i, p := range parts {
-		if len(p) > 0 {
+		if p != "" {
 			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
 		}
 	}

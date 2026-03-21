@@ -10,8 +10,9 @@ import (
 )
 
 // Parser reads SIIIR CSV exports and produces structured data.
+// The mapping field is set after format detection via DetectFormat.
 type Parser struct {
-	mapping *ColumnMapping
+	Mapping *ColumnMapping
 }
 
 // DetectFormat reads the first few lines of a CSV to determine which
@@ -68,13 +69,13 @@ func DetectFormat(reader io.ReadSeeker) (*ColumnMapping, error) {
 }
 
 // ParseStudents reads the CSV and returns structured student records.
-func ParseStudents(reader io.Reader, mapping *ColumnMapping) ([]SIIIRStudent, error) {
+func ParseStudents(reader io.Reader, mapping *ColumnMapping) ([]Student, error) {
 	csvReader := csv.NewReader(reader)
 	csvReader.Comma = mapping.Delimiter
-	csvReader.LazyQuotes = true    // SIIIR exports are inconsistent with quoting
+	csvReader.LazyQuotes = true // SIIIR exports are inconsistent with quoting
 	csvReader.TrimLeadingSpace = true
 
-	var students []SIIIRStudent
+	var students []Student
 
 	// Skip header row if present
 	header, err := csvReader.Read()
@@ -109,8 +110,8 @@ func ParseStudents(reader io.Reader, mapping *ColumnMapping) ([]SIIIRStudent, er
 	return students, nil
 }
 
-func rowToStudent(record []string, mapping *ColumnMapping) (SIIIRStudent, error) {
-	s := SIIIRStudent{Raw: make(map[string]string)}
+func rowToStudent(record []string, mapping *ColumnMapping) (Student, error) {
+	s := Student{Raw: make(map[string]string)}
 
 	get := func(field string) string {
 		if idx, ok := mapping.Columns[field]; ok && idx < len(record) {
@@ -159,13 +160,13 @@ func detectDelimiter(line string) rune {
 }
 
 func maxColumnIndex(cols map[string]int) int {
-	max := 0
+	result := 0
 	for _, idx := range cols {
-		if idx > max {
-			max = idx
+		if idx > result {
+			result = idx
 		}
 	}
-	return max
+	return result
 }
 
 func isHeaderRow(record []string, mapping *ColumnMapping) bool {
@@ -185,7 +186,7 @@ func isDigits(s string) bool {
 			return false
 		}
 	}
-	return len(s) > 0
+	return s != ""
 }
 
 // Ensure bufio is importable (used by callers for encoding conversion)

@@ -65,8 +65,8 @@ var KnownVersions = []ColumnMapping{
 	},
 }
 
-// SIIIRStudent represents a parsed student row from SIIIR CSV.
-type SIIIRStudent struct {
+// Student represents a parsed student row from SIIIR CSV.
+type Student struct {
 	CNP       string `json:"cnp"`
 	LastName  string `json:"last_name"`
 	FirstName string `json:"first_name"`
@@ -76,11 +76,11 @@ type SIIIRStudent struct {
 	BirthDate string `json:"birth_date"`
 	Gender    string `json:"gender"`
 	// Raw stores all original columns for source_metadata
-	Raw       map[string]string `json:"raw"`
+	Raw map[string]string `json:"raw"`
 }
 
-// SIIIRTeacher represents a parsed teacher row from SIIIR CSV.
-type SIIIRTeacher struct {
+// Teacher represents a parsed teacher row from SIIIR CSV.
+type Teacher struct {
 	CNP       string `json:"cnp"`
 	LastName  string `json:"last_name"`
 	FirstName string `json:"first_name"`

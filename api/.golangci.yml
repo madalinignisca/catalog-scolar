@@ -1,0 +1,58 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # Bug catchers
+    - govet
+    - staticcheck    # includes former gosimple + stylecheck
+    - errcheck
+    - nilerr
+    - bodyclose
+    - sqlclosecheck
+    - exhaustive
+    # Security
+    - gosec
+    # Code quality
+    - revive
+    - gocritic
+    - ineffassign
+    - unused
+
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: indent-error-flow
+        - name: error-return
+        - name: error-naming
+        - name: unexported-return
+        - name: blank-imports
+
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    paths:
+      - db/generated/
+    rules:
+      - path: '_test\.go'
+        linters:
+          - gosec
+        text: "G104"

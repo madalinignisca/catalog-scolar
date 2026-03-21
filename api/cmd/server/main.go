@@ -18,6 +18,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	cfg := config.Load()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -28,16 +35,14 @@ func main() {
 	// Database
 	db, err := platform.NewDB(cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("failed to connect to database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("connect to database: %w", err)
 	}
 	defer db.Close()
 
 	// Redis
 	rdb, err := platform.NewRedis(cfg.RedisURL)
 	if err != nil {
-		slog.Error("failed to connect to redis", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("connect to redis: %w", err)
 	}
 	defer rdb.Close()
 
@@ -156,13 +161,13 @@ func main() {
 			r.Post("/reports/isj-export", notImplemented)
 
 			// Interoperability (import/export)
-			r.Post("/interop/import", notImplemented)              // upload CSV, auto-detect format
-			r.Post("/interop/import/{importId}/confirm", notImplemented) // confirm after preview
+			r.Post("/interop/import", notImplemented)                             // upload CSV, auto-detect format
+			r.Post("/interop/import/{importId}/confirm", notImplemented)          // confirm after preview
 			r.Get("/interop/import/{importId}/status", notImplemented)
-			r.Post("/interop/export/siiir", notImplemented)        // export SIIIR format for ISJ
-			r.Post("/interop/portability/export/{studentId}", notImplemented) // student record package (EHEIF)
-			r.Post("/interop/portability/import", notImplemented)  // import transferred student
-			r.Get("/interop/source-mappings", notImplemented)      // list entity ↔ external ID mappings
+			r.Post("/interop/export/siiir", notImplemented)                       // export SIIIR format for ISJ
+			r.Post("/interop/portability/export/{studentId}", notImplemented)     // student record package (EHEIF)
+			r.Post("/interop/portability/import", notImplemented)                 // import transferred student
+			r.Get("/interop/source-mappings", notImplemented)                     // list entity ↔ external ID mappings
 		})
 
 		// OneRoster 1.2 API (separate auth: API key for machine-to-machine)
@@ -216,6 +221,7 @@ func main() {
 		slog.Error("forced shutdown", "error", err)
 	}
 	slog.Info("server stopped")
+	return nil
 }
 
 func notImplemented(w http.ResponseWriter, r *http.Request) {
