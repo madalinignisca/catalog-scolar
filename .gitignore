@@ -33,3 +33,8 @@ miniodata/
 # Secrets
 *.pem
 *.key
+
+# Playwright E2E
+web/test/e2e/results/
+web/playwright-report/
+web/blob-report/
