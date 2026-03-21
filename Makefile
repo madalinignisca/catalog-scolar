@@ -1,5 +1,6 @@
 .PHONY: dev dev-api dev-web test test-api test-web lint lint-api lint-web \
-       migrate migrate-down migrate-status sqlc seed build clean help
+       migrate migrate-down migrate-status sqlc seed build clean help \
+       check security fix hooks-install
 
 # ── Config ──────────────────────────────────────────────────
 DATABASE_URL ?= postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=disable
@@ -62,6 +63,36 @@ lint-api: ## Run golangci-lint
 
 lint-web: ## Run ESLint + Prettier check
 	cd web && npm run lint
+
+# ── Quality & Security ─────────────────────────────────────
+check: ## Run all quality checks (same as pre-commit hooks)
+	gitleaks detect --source . --config .gitleaks.toml --no-git -v
+	npx editorconfig-checker -exclude '.git|node_modules|.nuxt|.output|bin'
+	hadolint api/Dockerfile web/Dockerfile
+	cd web && npx prettier --check .
+	cd web && npx eslint .
+	cd api && golangci-lint run ./...
+	cd api && govulncheck ./...
+	cd web && npm audit --audit-level=high
+	helm lint helm/catalogro
+	semgrep --config .semgrep.yml api/
+
+security: ## Run security-focused checks only
+	cd api && golangci-lint run --enable-only gosec ./...
+	cd api && govulncheck ./...
+	cd web && npm audit --audit-level=high
+	gitleaks detect --source . --config .gitleaks.toml --no-git -v
+	semgrep --config .semgrep.yml api/
+
+fix: ## Auto-fix formatting and lint issues
+	cd web && npx prettier --write .
+	cd web && npx eslint --fix .
+	cd api && find . -name '*.go' -not -path './db/generated/*' | xargs goimports -w
+
+hooks-install: ## Install pre-commit hooks (run once after clone)
+	pre-commit install
+	@echo "Pre-commit hooks installed. Run 'npm install' in web/ if not done."
+	@echo "Run 'go mod tidy' in api/ if go.sum is missing."
 
 # ── Build ───────────────────────────────────────────────────
 build: build-api build-web ## Build API + Web
