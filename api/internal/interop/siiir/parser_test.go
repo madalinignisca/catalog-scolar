@@ -243,10 +243,10 @@ func TestDetectFormat(t *testing.T) {
 
 	// Each test case specifies what to feed DetectFormat and what to expect back.
 	tests := []struct {
-		name        string   // human-readable test case name
-		input       string   // CSV content to pass as io.ReadSeeker
-		wantVersion string   // expected ColumnMapping.Version (empty means error expected)
-		wantErr     bool     // true if DetectFormat should return an error
+		name        string // human-readable test case name
+		input       string // CSV content to pass as io.ReadSeeker
+		wantVersion string // expected ColumnMapping.Version (empty means error expected)
+		wantErr     bool   // true if DetectFormat should return an error
 	}{
 		{
 			name:        "2024-v1 format (semicolon, non-UTF-8)",

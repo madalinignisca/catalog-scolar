@@ -79,7 +79,11 @@ async function handleMfa() {
             class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
-        <div v-if="error" data-testid="login-error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+        <div
+          v-if="error"
+          data-testid="login-error"
+          class="rounded-lg bg-red-50 p-3 text-sm text-red-700"
+        >
           {{ error }}
         </div>
         <button
@@ -112,7 +116,11 @@ async function handleMfa() {
             class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-center text-2xl tracking-widest shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
-        <div v-if="error" data-testid="mfa-error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+        <div
+          v-if="error"
+          data-testid="mfa-error"
+          class="rounded-lg bg-red-50 p-3 text-sm text-red-700"
+        >
           {{ error }}
         </div>
         <button

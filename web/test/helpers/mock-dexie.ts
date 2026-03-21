@@ -224,9 +224,7 @@ function getField(record: Record<string, unknown>, field: string): unknown {
  *                          Set to `false` for tables that receive their own id
  *                          (e.g. grades and absences use string UUIDs as PK).
  */
-function createMockTable<T extends object>(
-  autoIncrementId: boolean,
-): MockTable<T> {
+function createMockTable<T extends object>(autoIncrementId: boolean): MockTable<T> {
   /**
    * The in-memory store.  Every record is stored as `StoredRecord<T>`.
    * We keep them in insertion order (standard JS array behaviour).

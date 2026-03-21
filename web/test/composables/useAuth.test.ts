@@ -127,7 +127,7 @@ const MFA_VERIFY_RESPONSE = {
  * signature (return type, parameter types) without us having to duplicate it.
  * The actual value is assigned in beforeEach after each module reset.
  */
-let useAuth: typeof import('~/composables/useAuth')['useAuth'];
+let useAuth: (typeof import('~/composables/useAuth'))['useAuth'];
 
 /**
  * Before each individual test:

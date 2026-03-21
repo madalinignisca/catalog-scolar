@@ -68,11 +68,7 @@
  * Relative imports must precede alias imports (`~/…`) to satisfy the
  * import-x/order ESLint rule configured in this project.
  */
-import {
-  createMockFetch,
-  mockSuccessResponse,
-  mockApiError,
-} from '../helpers/mock-api';
+import { createMockFetch, mockSuccessResponse, mockApiError } from '../helpers/mock-api';
 
 /**
  * We import the functions we want to test directly from the source module.
@@ -193,10 +189,7 @@ describe('api() — typed fetch wrapper', () => {
      */
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
-    const [calledUrl, calledInit] = mockFetch.mock.calls[0] as [
-      string,
-      RequestInit,
-    ];
+    const [calledUrl, calledInit] = mockFetch.mock.calls[0] as [string, RequestInit];
 
     // Verify the full URL was constructed correctly.
     expect(calledUrl).toBe(`${API_BASE}/auth/login`);

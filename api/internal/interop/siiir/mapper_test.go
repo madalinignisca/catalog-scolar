@@ -105,9 +105,9 @@ func TestMapStudent_NameNormalization(t *testing.T) {
 // because the current implementation does not implement that conversion.
 func TestMapStudent_ClassNormalization(t *testing.T) {
 	cases := []struct {
-		name           string // description of this case
-		inputClass     string // raw class string from CSV
-		expectedClass  string // expected normalised class name
+		name          string // description of this case
+		inputClass    string // raw class string from CSV
+		expectedClass string // expected normalised class name
 	}{
 		{
 			// Single space between grade number and section letter.

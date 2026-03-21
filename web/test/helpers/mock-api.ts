@@ -150,9 +150,7 @@ export function mockSuccessResponse<T>(data: T): SuccessResponseEnvelope<T> {
  *     '/grades/1': { status: 404, body: mockApiError(404, 'NOT_FOUND') },
  *   }));
  */
-export function createMockFetch(
-  routes: Record<string, MockRoute>,
-): typeof fetch {
+export function createMockFetch(routes: Record<string, MockRoute>): typeof fetch {
   /**
    * This is the function that replaces `window.fetch` during tests.
    *
@@ -163,23 +161,14 @@ export function createMockFetch(
    * accepted but ignored — tests that need to assert on what was sent to the
    * server should spy on the mock function itself via `vi.fn()`.
    */
-  return function mockFetch(
-    input: RequestInfo | URL,
-    _init?: RequestInit,
-  ): Promise<Response> {
+  return function mockFetch(input: RequestInfo | URL, _init?: RequestInit): Promise<Response> {
     // Normalise `input` to a plain string URL regardless of whether the caller
     // passed a string, a URL object, or a Request object.
     const url: string =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url; // Request object
+      typeof input === 'string' ? input : input instanceof URL ? input.href : input.url; // Request object
 
     // Find the first route whose key is a suffix of the requested URL.
-    const routeEntry = Object.entries(routes).find(([key]) =>
-      url.endsWith(key),
-    );
+    const routeEntry = Object.entries(routes).find(([key]) => url.endsWith(key));
 
     // If nothing matched, fail loudly so the test author knows they need to
     // add a route (or that the code under test is making an unexpected call).

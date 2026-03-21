@@ -153,11 +153,11 @@ func SeedSchools(t *testing.T, pool *pgxpool.Pool) (school1ID, school2ID uuid.UU
 		school1ID,
 		"2025-2026",
 		time.Date(2025, 9, 8, 0, 0, 0, 0, time.UTC),  // start_date
-		time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC),  // end_date
-		time.Date(2025, 9, 8, 0, 0, 0, 0, time.UTC),   // sem1_start
-		time.Date(2026, 1, 30, 0, 0, 0, 0, time.UTC),  // sem1_end
-		time.Date(2026, 2, 9, 0, 0, 0, 0, time.UTC),   // sem2_start
-		time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC),  // sem2_end
+		time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC), // end_date
+		time.Date(2025, 9, 8, 0, 0, 0, 0, time.UTC),  // sem1_start
+		time.Date(2026, 1, 30, 0, 0, 0, 0, time.UTC), // sem1_end
+		time.Date(2026, 2, 9, 0, 0, 0, 0, time.UTC),  // sem2_start
+		time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC), // sem2_end
 		true, // is_current
 	)
 	if err != nil {
