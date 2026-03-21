@@ -127,15 +127,13 @@ func HandleMFALogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 			// The totp.Validate function handles the time window (typically accepts
 			// codes from -1/+1 time step to account for clock skew).
 			totpValid = totp.Validate(req.TOTPCode, string(user.TotpSecret))
-		} else {
+		} else if len(req.TOTPCode) == 6 {
 			// POC fallback: no TOTP secret stored yet. Accept any 6-digit numeric code.
 			// This allows testing the 2FA flow without setting up an authenticator app.
 			// SECURITY: Remove this fallback before production launch!
-			if len(req.TOTPCode) == 6 {
-				slog.Warn("2fa login: accepting TOTP code without secret (POC mode)",
-					"user_id", userID)
-				totpValid = true
-			}
+			slog.Warn("2fa login: accepting TOTP code without secret (POC mode)",
+				"user_id", userID)
+			totpValid = true
 		}
 
 		if !totpValid {
@@ -199,7 +197,7 @@ func HandleMFALogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 //
 // The generated secret uses the default settings: SHA1, 6 digits, 30-second period.
 // These are the standard TOTP settings compatible with all major authenticator apps.
-func GenerateTOTPSecret(issuer, account string) (secret string, qrURL string, err error) {
+func GenerateTOTPSecret(issuer, account string) (secret, qrURL string, err error) {
 	// Generate a new TOTP key using the pquerna/otp library.
 	// This creates a random secret and builds the otpauth:// URL.
 	key, err := totp.Generate(totp.GenerateOpts{

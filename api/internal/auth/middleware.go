@@ -159,7 +159,7 @@ func TenantContext(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			// Step 4: Set the tenant (school_id) for RLS.
 			// This calls: SELECT set_config('app.current_school_id', '<uuid>', true)
 			// The "true" means "local to this transaction" — it auto-clears on COMMIT/ROLLBACK.
-			_, err = tx.Exec(r.Context(), "SELECT set_config('app.current_school_id', $1, true)", claims.SchoolID)
+			_, err = tx.Exec(r.Context(), "SELECT set_config('app.current_school_id', $1, true)", claims.SchoolID) // nosemgrep: rls-missing-tenant-context — this IS the tenant context middleware
 			if err != nil {
 				_ = tx.Rollback(r.Context())
 				slog.Error("failed to set tenant context", "school_id", claims.SchoolID, "error", err)

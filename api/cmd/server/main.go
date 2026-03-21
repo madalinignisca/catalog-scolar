@@ -30,8 +30,10 @@ import (
 
 	"github.com/vlahsh/catalogro/api/db/generated"
 	"github.com/vlahsh/catalogro/api/internal/auth"
+	"github.com/vlahsh/catalogro/api/internal/catalog"
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
+	"github.com/vlahsh/catalogro/api/internal/school"
 )
 
 func main() {
@@ -90,6 +92,18 @@ func run() error {
 	// JWT secret — convert the config string to a byte slice for HMAC signing
 	// =========================================================================
 	jwtSecret := []byte(cfg.JWTSecret)
+
+	// =========================================================================
+	// Handler initialization — create handler structs with shared dependencies
+	// =========================================================================
+	// Each handler struct holds a reference to the sqlc Queries and the logger.
+	// They are created once here and reused for every request (safe for concurrent use).
+
+	// schoolHandler manages school info, classes, subjects, and teacher assignments.
+	schoolHandler := school.NewHandler(queries, logger)
+
+	// catalogHandler manages grades (note) and absences (absente) — the core catalog.
+	catalogHandler := catalog.NewHandler(queries, logger)
 
 	// =========================================================================
 	// Router setup
@@ -239,22 +253,28 @@ func run() error {
 			r.Post("/users/me/gdpr/delete", notImplemented)
 
 			// School config
-			r.Get("/schools/current", notImplemented)
+			// GET /schools/current — returns the current tenant's school details.
+			r.Get("/schools/current", schoolHandler.GetCurrentSchool)
 			r.Put("/schools/current", notImplemented)
 			r.Get("/schools/current/year", notImplemented)
 
 			// Classes
-			r.Get("/classes", notImplemented)
+			// GET /classes — list classes for current school year.
+			// Teachers see only their assigned classes; admins see all.
+			r.Get("/classes", schoolHandler.ListClasses)
 			r.Post("/classes", notImplemented)
-			r.Get("/classes/{classId}", notImplemented)
+			// GET /classes/{classId} — class details with enrolled students.
+			r.Get("/classes/{classId}", schoolHandler.GetClass)
 			r.Put("/classes/{classId}", notImplemented)
 			r.Post("/classes/{classId}/enroll", notImplemented)
 			r.Delete("/classes/{classId}/enroll/{studentId}", notImplemented)
-			r.Get("/classes/{classId}/teachers", notImplemented)
+			// GET /classes/{classId}/teachers — teacher-subject assignments for a class.
+			r.Get("/classes/{classId}/teachers", schoolHandler.ListTeachers)
 			r.Post("/classes/{classId}/teachers", notImplemented)
 
 			// Subjects
-			r.Get("/subjects", notImplemented)
+			// GET /subjects — list all active subjects for the school.
+			r.Get("/subjects", schoolHandler.ListSubjects)
 			r.Post("/subjects", notImplemented)
 
 			// Catalog (grades)

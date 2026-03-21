@@ -86,7 +86,7 @@ func Created(w http.ResponseWriter, data any) {
 
 // List writes a 200 OK response wrapping the items in { "data": [...], "meta": ... }.
 // The meta parameter is optional — pass nil if there is no pagination info.
-func List(w http.ResponseWriter, data any, meta any) {
+func List(w http.ResponseWriter, data, meta any) {
 	JSON(w, http.StatusOK, ListResponse{Data: data, Meta: meta})
 }
 
@@ -98,7 +98,7 @@ func List(w http.ResponseWriter, data any, meta any) {
 //	httputil.Error(w, http.StatusBadRequest, "INVALID_INPUT", "The semester field must be I or II")
 //	httputil.Error(w, http.StatusNotFound, "NOT_FOUND", "Grade not found")
 //	httputil.Error(w, http.StatusForbidden, "FORBIDDEN", "You are not assigned to this class")
-func Error(w http.ResponseWriter, status int, code string, message string) {
+func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, ErrorResponse{
 		Error: ErrorBody{
 			Code:    code,
@@ -109,7 +109,7 @@ func Error(w http.ResponseWriter, status int, code string, message string) {
 
 // BadRequest writes a 400 Bad Request error response.
 // Shorthand for Error(w, 400, code, message).
-func BadRequest(w http.ResponseWriter, code string, message string) {
+func BadRequest(w http.ResponseWriter, code, message string) {
 	Error(w, http.StatusBadRequest, code, message)
 }
 

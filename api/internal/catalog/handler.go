@@ -182,24 +182,19 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 	// The SQL results are flat rows (one row per grade). We need to group them
 	// into a structure where each student has an array of their grades.
 	// We use a map to collect grades per student, and a slice to preserve order.
-	type studentKey struct {
-		id        uuid.UUID
-		firstName string
-		lastName  string
-	}
-
+	// Indexing (rows[i]) avoids copying the large row struct on each iteration.
 	studentOrder := []uuid.UUID{}              // Preserves the alphabetical order from SQL.
 	studentMap := map[uuid.UUID]*studentGrades{} // Groups grades by student ID.
 
-	for _, row := range rows {
+	for i := range rows {
 		// If this is the first grade we've seen for this student, create the entry.
-		if _, exists := studentMap[row.StudentID]; !exists {
-			studentOrder = append(studentOrder, row.StudentID)
-			studentMap[row.StudentID] = &studentGrades{
+		if _, exists := studentMap[rows[i].StudentID]; !exists {
+			studentOrder = append(studentOrder, rows[i].StudentID)
+			studentMap[rows[i].StudentID] = &studentGrades{
 				Student: studentInfo{
-					ID:        row.StudentID,
-					FirstName: row.StudentFirstName,
-					LastName:  row.StudentLastName,
+					ID:        rows[i].StudentID,
+					FirstName: rows[i].StudentFirstName,
+					LastName:  rows[i].StudentLastName,
 				},
 				Grades: []gradeResponse{},
 			}
@@ -207,24 +202,24 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 
 		// Convert the qualifier grade from the nullable enum to a plain *string.
 		var qualGrade *string
-		if row.QualifierGrade.Valid {
-			s := string(row.QualifierGrade.Qualifier)
+		if rows[i].QualifierGrade.Valid {
+			s := string(rows[i].QualifierGrade.Qualifier)
 			qualGrade = &s
 		}
 
 		// Append this grade to the student's list.
-		studentMap[row.StudentID].Grades = append(studentMap[row.StudentID].Grades, gradeResponse{
-			ID:             row.ID,
-			StudentID:      row.StudentID,
-			TeacherID:      row.TeacherID,
-			Semester:       string(row.Semester),
-			NumericGrade:   row.NumericGrade,
+		studentMap[rows[i].StudentID].Grades = append(studentMap[rows[i].StudentID].Grades, gradeResponse{
+			ID:             rows[i].ID,
+			StudentID:      rows[i].StudentID,
+			TeacherID:      rows[i].TeacherID,
+			Semester:       string(rows[i].Semester),
+			NumericGrade:   rows[i].NumericGrade,
 			QualifierGrade: qualGrade,
-			IsThesis:       row.IsThesis,
-			GradeDate:      row.GradeDate.Time.Format("2006-01-02"),
-			Description:    row.Description,
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
+			IsThesis:       rows[i].IsThesis,
+			GradeDate:      rows[i].GradeDate.Time.Format("2006-01-02"),
+			Description:    rows[i].Description,
+			CreatedAt:      rows[i].CreatedAt,
+			UpdatedAt:      rows[i].UpdatedAt,
 		})
 	}
 
@@ -436,7 +431,7 @@ func (h *Handler) CreateGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 11: Return the created grade.
-	httputil.Created(w, mapGradeToResponse(grade))
+	httputil.Created(w, mapGradeToResponse(&grade))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -567,7 +562,7 @@ func (h *Handler) UpdateGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 9: Return the updated grade.
-	httputil.Success(w, mapGradeToResponse(updated))
+	httputil.Success(w, mapGradeToResponse(&updated))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -653,7 +648,7 @@ func (h *Handler) DeleteGrade(w http.ResponseWriter, r *http.Request) {
 //   - Nullable qualifier grade enum to a plain *string
 //   - pgtype.Date to a YYYY-MM-DD string
 //   - Semester enum to a plain string
-func mapGradeToResponse(g generated.Grade) gradeResponse {
+func mapGradeToResponse(g *generated.Grade) gradeResponse {
 	// Convert the qualifier grade from the nullable DB enum to a plain *string.
 	// The qualifier is nil for numeric grades (middle/high school).
 	var qualGrade *string

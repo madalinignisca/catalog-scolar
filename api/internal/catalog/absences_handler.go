@@ -350,7 +350,7 @@ func (h *Handler) CreateAbsence(w http.ResponseWriter, r *http.Request) {
 	// Step 8: Determine which semester the absence falls in based on the date.
 	// The school_years table has sem1_start, sem1_end, sem2_start, sem2_end dates.
 	// If the absence date falls within semester 1, it is semester I; otherwise semester II.
-	semester := determineSemester(absDate, schoolYear)
+	semester := determineSemester(absDate, &schoolYear)
 
 	// Step 9: Build optional offline sync fields.
 	var clientID pgtype.UUID

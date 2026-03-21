@@ -216,20 +216,20 @@ func (h *Handler) ListClasses(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = make([]classListItem, len(rows))
-		for i, row := range rows {
+		for i := range rows {
 			items[i] = classListItem{
-				ID:             row.ID,
-				Name:           row.Name,
-				EducationLevel: string(row.EducationLevel),
-				GradeNumber:    row.GradeNumber,
-				MaxStudents:    row.MaxStudents,
+				ID:             rows[i].ID,
+				Name:           rows[i].Name,
+				EducationLevel: string(rows[i].EducationLevel),
+				GradeNumber:    rows[i].GradeNumber,
+				MaxStudents:    rows[i].MaxStudents,
 			}
 			// Include homeroom teacher info if the class has one assigned.
-			if row.HomeroomTeacherID.Valid {
+			if rows[i].HomeroomTeacherID.Valid {
 				items[i].HomeroomTeacher = &teacherBrief{
-					ID:        row.HomeroomTeacherID.Bytes,
-					FirstName: ptrOrEmpty(row.HomeroomFirstName),
-					LastName:  ptrOrEmpty(row.HomeroomLastName),
+					ID:        rows[i].HomeroomTeacherID.Bytes,
+					FirstName: ptrOrEmpty(rows[i].HomeroomFirstName),
+					LastName:  ptrOrEmpty(rows[i].HomeroomLastName),
 				}
 			}
 		}
@@ -242,19 +242,19 @@ func (h *Handler) ListClasses(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		items = make([]classListItem, len(rows))
-		for i, row := range rows {
+		for i := range rows {
 			items[i] = classListItem{
-				ID:             row.ID,
-				Name:           row.Name,
-				EducationLevel: string(row.EducationLevel),
-				GradeNumber:    row.GradeNumber,
-				MaxStudents:    row.MaxStudents,
+				ID:             rows[i].ID,
+				Name:           rows[i].Name,
+				EducationLevel: string(rows[i].EducationLevel),
+				GradeNumber:    rows[i].GradeNumber,
+				MaxStudents:    rows[i].MaxStudents,
 			}
-			if row.HomeroomTeacherID.Valid {
+			if rows[i].HomeroomTeacherID.Valid {
 				items[i].HomeroomTeacher = &teacherBrief{
-					ID:        row.HomeroomTeacherID.Bytes,
-					FirstName: ptrOrEmpty(row.HomeroomFirstName),
-					LastName:  ptrOrEmpty(row.HomeroomLastName),
+					ID:        rows[i].HomeroomTeacherID.Bytes,
+					FirstName: ptrOrEmpty(rows[i].HomeroomFirstName),
+					LastName:  ptrOrEmpty(rows[i].HomeroomLastName),
 				}
 			}
 		}
