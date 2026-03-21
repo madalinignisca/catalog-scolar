@@ -45,26 +45,26 @@ import (
 
 // absenceResponse is the JSON shape for a single absence in API responses.
 type absenceResponse struct {
-	ID              uuid.UUID  `json:"id"`
-	StudentID       uuid.UUID  `json:"student_id"`
-	StudentName     string     `json:"student_name"`
-	SubjectID       uuid.UUID  `json:"subject_id"`
-	TeacherID       uuid.UUID  `json:"teacher_id"`
-	Semester        string     `json:"semester"`
-	AbsenceDate     string     `json:"absence_date"`
-	PeriodNumber    int16      `json:"period_number"`
-	AbsenceType     string     `json:"absence_type"`
-	ExcuseReason    *string    `json:"excuse_reason,omitempty"`
-	ExcuseDocument  *string    `json:"excuse_document,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	StudentID      uuid.UUID `json:"student_id"`
+	StudentName    string    `json:"student_name"`
+	SubjectID      uuid.UUID `json:"subject_id"`
+	TeacherID      uuid.UUID `json:"teacher_id"`
+	Semester       string    `json:"semester"`
+	AbsenceDate    string    `json:"absence_date"`
+	PeriodNumber   int16     `json:"period_number"`
+	AbsenceType    string    `json:"absence_type"`
+	ExcuseReason   *string   `json:"excuse_reason,omitempty"`
+	ExcuseDocument *string   `json:"excuse_document,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // ListAbsences handles GET /catalog/classes/{classId}/absences.
 //
 // Supports two query modes:
-//   1. By specific date: ?date=2026-10-15
-//   2. By semester and month: ?semester=I&month=10&school_year_id=xxx
+//  1. By specific date: ?date=2026-10-15
+//  2. By semester and month: ?semester=I&month=10&school_year_id=xxx
 //
 // Returns a flat list of absences for the class, including student names.
 //
@@ -255,10 +255,10 @@ type createAbsenceRequest struct {
 // type "unexcused" — they can be excused later via the PUT /excuse endpoint.
 //
 // Validation rules:
-//   1. The teacher must be assigned to the class+subject.
-//   2. absence_date must be a valid date.
-//   3. period_number must be between 1 and 14 (Romanian schools have up to 7-8
-//      periods per day, but we allow up to 14 for edge cases like exam days).
+//  1. The teacher must be assigned to the class+subject.
+//  2. absence_date must be a valid date.
+//  3. period_number must be between 1 and 14 (Romanian schools have up to 7-8
+//     periods per day, but we allow up to 14 for edge cases like exam days).
 //
 // Possible responses:
 //   - 201 Created: { "data": { created absence } }
@@ -377,7 +377,7 @@ func (h *Handler) CreateAbsence(w http.ResponseWriter, r *http.Request) {
 		PeriodNumber:    req.PeriodNumber,
 		AbsenceType:     generated.AbsenceTypeUnexcused,
 		ClientID:        clientID,
-		ClientTimestamp:  clientTimestamp,
+		ClientTimestamp: clientTimestamp,
 		SyncStatus:      generated.SyncStatusSynced,
 	})
 	if err != nil {
@@ -403,8 +403,8 @@ type excuseAbsenceRequest struct {
 	//   - "medical" — excused with a medical certificate (adeverinta medicala)
 	//   - "excused" — excused for other valid reasons (e.g. family emergency)
 	//   - "school_event" — absent due to a school-organized event
-	AbsenceType   string  `json:"absence_type"`
-	ExcuseReason  *string `json:"excuse_reason"`
+	AbsenceType  string  `json:"absence_type"`
+	ExcuseReason *string `json:"excuse_reason"`
 }
 
 // ExcuseAbsence handles PUT /catalog/absences/{absenceId}/excuse.
@@ -473,9 +473,9 @@ func (h *Handler) ExcuseAbsence(w http.ResponseWriter, r *http.Request) {
 	// Step 6: Update the absence with the excuse information.
 	// The excused_by field records who excused it, and excused_at records when.
 	updated, err := h.queries.ExcuseAbsence(r.Context(), generated.ExcuseAbsenceParams{
-		ID:          absenceID,
-		AbsenceType: absType,
-		ExcusedBy:   pgtype.UUID{Bytes: userID, Valid: true},
+		ID:           absenceID,
+		AbsenceType:  absType,
+		ExcusedBy:    pgtype.UUID{Bytes: userID, Valid: true},
 		ExcuseReason: req.ExcuseReason,
 		// ExcuseDocument is not set here — it could be added via a file upload endpoint.
 		ExcuseDocument: nil,

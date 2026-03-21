@@ -132,9 +132,7 @@ const usesQualifiers = computed(() => props.educationLevel === 'primary');
 /**
  * Modal title changes based on whether we are adding or editing.
  */
-const modalTitle = computed(() =>
-  isEditing.value ? 'Modifică nota' : 'Adaugă notă',
-);
+const modalTitle = computed(() => (isEditing.value ? 'Modifică nota' : 'Adaugă notă'));
 
 // ── Watchers ───────────────────────────────────────────────────────────────
 
@@ -229,10 +227,7 @@ function handleClose(): void {
 <template>
   <!-- Modal backdrop + container. Only rendered when `visible` is true. -->
   <Teleport to="body">
-    <div
-      v-if="visible"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4"
-    >
+    <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <!-- Backdrop: semi-transparent overlay. Clicking it closes the modal. -->
       <button
         type="button"
@@ -266,9 +261,7 @@ function handleClose(): void {
           <!-- Teachers select one of four qualifiers instead of a number.  -->
           <!-- ============================================================ -->
           <fieldset v-if="usesQualifiers">
-            <legend class="mb-2 block text-sm font-medium text-gray-700">
-              Calificativ
-            </legend>
+            <legend class="mb-2 block text-sm font-medium text-gray-700">Calificativ</legend>
             <div class="grid grid-cols-2 gap-2">
               <button
                 v-for="option in qualifierOptions"
@@ -345,10 +338,7 @@ function handleClose(): void {
           </div>
 
           <!-- Validation error message -->
-          <div
-            v-if="validationError !== ''"
-            class="rounded-lg bg-red-50 p-3 text-sm text-red-700"
-          >
+          <div v-if="validationError !== ''" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {{ validationError }}
           </div>
 

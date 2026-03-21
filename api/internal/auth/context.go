@@ -6,11 +6,11 @@
 //
 // There are two styles of getters:
 //
-//   1. GetUserID(ctx) (uuid.UUID, error) — returns a parsed UUID + error.
-//      Used by existing handlers (catalog, school) that expect this signature.
+//  1. GetUserID(ctx) (uuid.UUID, error) — returns a parsed UUID + error.
+//     Used by existing handlers (catalog, school) that expect this signature.
 //
-//   2. GetClaims(ctx) *Claims — returns the full claims struct (nil if missing).
-//      Used by middleware and new handlers that need all claims at once.
+//  2. GetClaims(ctx) *Claims — returns the full claims struct (nil if missing).
+//     Used by middleware and new handlers that need all claims at once.
 package auth
 
 import (

@@ -65,17 +65,17 @@ func NewHandler(queries *generated.Queries, logger *slog.Logger) *Handler {
 // gradeResponse is the JSON shape for a single grade in API responses.
 // We define this separately from the DB model to control the API contract.
 type gradeResponse struct {
-	ID             uuid.UUID  `json:"id"`
-	StudentID      uuid.UUID  `json:"student_id"`
-	TeacherID      uuid.UUID  `json:"teacher_id"`
-	Semester       string     `json:"semester"`
-	NumericGrade   *int16     `json:"numeric_grade,omitempty"`
-	QualifierGrade *string    `json:"qualifier_grade,omitempty"`
-	IsThesis       bool       `json:"is_thesis"`
-	GradeDate      string     `json:"grade_date"`
-	Description    *string    `json:"description,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	StudentID      uuid.UUID `json:"student_id"`
+	TeacherID      uuid.UUID `json:"teacher_id"`
+	Semester       string    `json:"semester"`
+	NumericGrade   *int16    `json:"numeric_grade,omitempty"`
+	QualifierGrade *string   `json:"qualifier_grade,omitempty"`
+	IsThesis       bool      `json:"is_thesis"`
+	GradeDate      string    `json:"grade_date"`
+	Description    *string   `json:"description,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // studentGrades groups a student with their list of grades for the response.
@@ -183,7 +183,7 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 	// into a structure where each student has an array of their grades.
 	// We use a map to collect grades per student, and a slice to preserve order.
 	// Indexing (rows[i]) avoids copying the large row struct on each iteration.
-	studentOrder := []uuid.UUID{}              // Preserves the alphabetical order from SQL.
+	studentOrder := []uuid.UUID{}                // Preserves the alphabetical order from SQL.
 	studentMap := map[uuid.UUID]*studentGrades{} // Groups grades by student ID.
 
 	for i := range rows {
@@ -243,16 +243,16 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 // The client sends either numeric_grade (for middle/high school) or
 // qualifier_grade (for primary school), but never both.
 type createGradeRequest struct {
-	StudentID      uuid.UUID  `json:"student_id"`
-	ClassID        uuid.UUID  `json:"class_id"`
-	SubjectID      uuid.UUID  `json:"subject_id"`
-	Semester       string     `json:"semester"`
-	NumericGrade   *int16     `json:"numeric_grade"`
-	QualifierGrade *string    `json:"qualifier_grade"`
-	IsThesis       bool       `json:"is_thesis"`
-	GradeDate      string     `json:"grade_date"`
-	Description    *string    `json:"description"`
-	ClientID       *uuid.UUID `json:"client_id"`
+	StudentID       uuid.UUID  `json:"student_id"`
+	ClassID         uuid.UUID  `json:"class_id"`
+	SubjectID       uuid.UUID  `json:"subject_id"`
+	Semester        string     `json:"semester"`
+	NumericGrade    *int16     `json:"numeric_grade"`
+	QualifierGrade  *string    `json:"qualifier_grade"`
+	IsThesis        bool       `json:"is_thesis"`
+	GradeDate       string     `json:"grade_date"`
+	Description     *string    `json:"description"`
+	ClientID        *uuid.UUID `json:"client_id"`
 	ClientTimestamp *time.Time `json:"client_timestamp"`
 }
 
@@ -420,7 +420,7 @@ func (h *Handler) CreateGrade(w http.ResponseWriter, r *http.Request) {
 		GradeDate:       pgtype.Date{Time: gradeDate, Valid: true},
 		Description:     req.Description,
 		ClientID:        clientID,
-		ClientTimestamp:  clientTimestamp,
+		ClientTimestamp: clientTimestamp,
 		SyncStatus:      generated.SyncStatusSynced,
 	})
 	if err != nil {
@@ -686,4 +686,3 @@ func formatDate(d pgtype.Date) string {
 	}
 	return d.Time.Format("2006-01-02")
 }
-

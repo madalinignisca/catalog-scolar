@@ -86,12 +86,8 @@ function openClass(classItem: TeacherClass): void {
   <div v-if="user?.role === 'teacher'" class="space-y-6">
     <!-- Page heading -->
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">
-        Tablou de bord
-      </h1>
-      <p class="mt-1 text-sm text-gray-500">
-        Clasele la care predați în anul școlar curent
-      </p>
+      <h1 class="text-2xl font-bold text-gray-900">Tablou de bord</h1>
+      <p class="mt-1 text-sm text-gray-500">Clasele la care predați în anul școlar curent</p>
     </div>
 
     <!-- Error banner: shown if the class list failed to load -->
@@ -133,9 +129,7 @@ function openClass(classItem: TeacherClass): void {
           d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
         />
       </svg>
-      <h3 class="mt-4 text-sm font-semibold text-gray-900">
-        Nicio clasă asignată
-      </h3>
+      <h3 class="mt-4 text-sm font-semibold text-gray-900">Nicio clasă asignată</h3>
       <p class="mt-1 text-sm text-gray-500">
         Contactați secretariatul pentru a fi repartizat la clase.
       </p>
@@ -155,9 +149,7 @@ function openClass(classItem: TeacherClass): void {
           <h3 class="text-lg font-semibold text-gray-900 group-hover:text-blue-700">
             Clasa {{ classItem.name }}
           </h3>
-          <span
-            class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
-          >
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
             {{ educationLevelLabels[classItem.educationLevel] ?? classItem.educationLevel }}
           </span>
         </div>
@@ -170,9 +162,7 @@ function openClass(classItem: TeacherClass): void {
 
         <!-- Subjects the teacher teaches in this class -->
         <div v-if="classItem.subjects.length > 0" class="mt-3">
-          <p class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">
-            Materii
-          </p>
+          <p class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Materii</p>
           <div class="flex flex-wrap gap-1.5">
             <span
               v-for="subject in classItem.subjects"
@@ -185,9 +175,17 @@ function openClass(classItem: TeacherClass): void {
         </div>
 
         <!-- Visual indicator to show this is clickable -->
-        <div class="mt-4 flex items-center text-xs font-medium text-blue-600 opacity-0 transition-opacity group-hover:opacity-100">
+        <div
+          class="mt-4 flex items-center text-xs font-medium text-blue-600 opacity-0 transition-opacity group-hover:opacity-100"
+        >
           Deschide catalogul
-          <svg class="ml-1 h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg
+            class="ml-1 h-3 w-3"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
           </svg>
         </div>
@@ -201,12 +199,8 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <div v-else-if="user?.role === 'admin'" class="space-y-6">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">
-        Administrare școală
-      </h1>
-      <p class="mt-1 text-sm text-gray-500">
-        Gestionați utilizatori, clase și configurări
-      </p>
+      <h1 class="text-2xl font-bold text-gray-900">Administrare școală</h1>
+      <p class="mt-1 text-sm text-gray-500">Gestionați utilizatori, clase și configurări</p>
     </div>
 
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -216,9 +210,7 @@ function openClass(classItem: TeacherClass): void {
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
       >
         <h3 class="font-semibold text-gray-900">Utilizatori</h3>
-        <p class="mt-1 text-sm text-gray-500">
-          Provizionare conturi, activări în așteptare
-        </p>
+        <p class="mt-1 text-sm text-gray-500">Provizionare conturi, activări în așteptare</p>
       </NuxtLink>
 
       <!-- Classes management card -->
@@ -227,9 +219,7 @@ function openClass(classItem: TeacherClass): void {
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
       >
         <h3 class="font-semibold text-gray-900">Clase &amp; Materii</h3>
-        <p class="mt-1 text-sm text-gray-500">
-          Încadrare, formațiuni de studiu
-        </p>
+        <p class="mt-1 text-sm text-gray-500">Încadrare, formațiuni de studiu</p>
       </NuxtLink>
 
       <!-- Reports card -->
@@ -238,9 +228,7 @@ function openClass(classItem: TeacherClass): void {
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
       >
         <h3 class="font-semibold text-gray-900">Rapoarte</h3>
-        <p class="mt-1 text-sm text-gray-500">
-          Dashboard, statistici, export ISJ
-        </p>
+        <p class="mt-1 text-sm text-gray-500">Dashboard, statistici, export ISJ</p>
       </NuxtLink>
     </div>
   </div>
@@ -250,16 +238,10 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <div v-else-if="user?.role === 'parent'" class="space-y-6">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">
-        Copiii mei
-      </h1>
-      <p class="mt-1 text-sm text-gray-500">
-        Vizualizați situația școlară a copiilor
-      </p>
+      <h1 class="text-2xl font-bold text-gray-900">Copiii mei</h1>
+      <p class="mt-1 text-sm text-gray-500">Vizualizați situația școlară a copiilor</p>
     </div>
-    <p class="text-gray-500">
-      Încărcare date...
-    </p>
+    <p class="text-gray-500">Încărcare date...</p>
   </div>
 
   <!-- ================================================================== -->

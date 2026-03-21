@@ -147,16 +147,20 @@ const roleLabels: Record<string, string> = {
           <h2 class="truncate text-sm font-semibold text-gray-900">
             {{ currentSchool?.name ?? 'CatalogRO' }}
           </h2>
-          <p class="truncate text-xs text-gray-500">
-            Catalog Școlar Digital
-          </p>
+          <p class="truncate text-xs text-gray-500">Catalog Școlar Digital</p>
         </div>
         <!-- Close button (mobile only) -->
         <button
           class="ml-2 rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 lg:hidden"
           @click="closeSidebar"
         >
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg
+            class="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -213,21 +217,27 @@ const roleLabels: Record<string, string> = {
     <!-- ================================================================== -->
     <div class="flex flex-1 flex-col">
       <!-- Top navigation bar -->
-      <header class="sticky top-0 z-20 flex h-16 items-center border-b border-gray-200 bg-white px-4 shadow-sm">
+      <header
+        class="sticky top-0 z-20 flex h-16 items-center border-b border-gray-200 bg-white px-4 shadow-sm"
+      >
         <!-- Mobile menu button (hamburger) — opens the sidebar on small screens -->
         <button
           class="mr-3 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 lg:hidden"
           @click="toggleSidebar"
         >
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg
+            class="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
 
         <!-- Logo (visible on all sizes) -->
-        <NuxtLink to="/" class="text-lg font-bold text-gray-900">
-          CatalogRO
-        </NuxtLink>
+        <NuxtLink to="/" class="text-lg font-bold text-gray-900"> CatalogRO </NuxtLink>
 
         <!-- Spacer to push right-side items to the end -->
         <div class="flex-1" />
@@ -239,9 +249,7 @@ const roleLabels: Record<string, string> = {
 
           <!-- Current user name + role badge (hidden on very small screens) -->
           <div v-if="user" class="hidden items-center gap-2 sm:flex">
-            <span class="text-sm text-gray-600">
-              {{ user.firstName }} {{ user.lastName }}
-            </span>
+            <span class="text-sm text-gray-600"> {{ user.firstName }} {{ user.lastName }} </span>
             <span class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">
               {{ roleLabels[user.role] ?? user.role }}
             </span>

@@ -368,11 +368,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
 
     <!-- Loading skeleton for the grade table -->
     <div v-if="isLoading" class="space-y-3">
-      <div
-        v-for="n in 5"
-        :key="n"
-        class="h-12 animate-pulse rounded-lg bg-gray-200"
-      />
+      <div v-for="n in 5" :key="n" class="h-12 animate-pulse rounded-lg bg-gray-200" />
     </div>
 
     <!-- Empty state: no students in this class -->
@@ -380,9 +376,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
       v-else-if="sortedStudents.length === 0"
       class="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center"
     >
-      <p class="text-sm text-gray-500">
-        Nu există elevi înscriși în această clasă.
-      </p>
+      <p class="text-sm text-gray-500">Nu există elevi înscriși în această clasă.</p>
     </div>
 
     <!-- ================================================================== -->
@@ -460,11 +454,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             <td class="px-4 py-3">
               <div class="flex flex-wrap items-center gap-1.5">
                 <!-- Individual grade badges -->
-                <div
-                  v-for="grade in student.grades"
-                  :key="grade.id"
-                  class="group relative"
-                >
+                <div v-for="grade in student.grades" :key="grade.id" class="group relative">
                   <!-- Grade badge button: click to edit this grade -->
                   <button
                     type="button"
@@ -490,27 +480,31 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                     class="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white group-hover:flex"
                     @click.stop="handleDeleteGrade(grade)"
                   >
-                    <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    <svg
+                      class="h-2.5 w-2.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="3"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M6 18L18 6M6 6l12 12"
+                      />
                     </svg>
                   </button>
                 </div>
 
                 <!-- Empty state: no grades yet for this student -->
-                <span
-                  v-if="student.grades.length === 0"
-                  class="text-xs italic text-gray-400"
-                >
+                <span v-if="student.grades.length === 0" class="text-xs italic text-gray-400">
                   Nicio notă
                 </span>
               </div>
             </td>
 
             <!-- Average column (only for numeric grades) -->
-            <td
-              v-if="!usesQualifiers"
-              class="whitespace-nowrap px-4 py-3 text-center"
-            >
+            <td v-if="!usesQualifiers" class="whitespace-nowrap px-4 py-3 text-center">
               <span
                 :class="[
                   'text-sm font-semibold',
@@ -533,7 +527,13 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-600 transition-colors hover:bg-blue-100"
                 @click="openAddGrade(student)"
               >
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg
+                  class="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
                   <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
                 </svg>
               </button>

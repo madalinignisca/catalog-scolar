@@ -14,7 +14,7 @@
   1. On mount, fetch class details from GET /classes/{classId}
   2. Fetch the teacher's subjects for this class from GET /classes/{classId}/teachers
   3. When a subject tab is clicked, the GradeGrid fetches grades automatically
-     (it watches its props and refetches when they change)
+  (it watches its props and refetches when they change)
 
   The page uses the default layout (sidebar + top bar).
 -->
@@ -138,10 +138,7 @@ onMounted(async () => {
       if (found.subjects.length > 0) {
         subjects.value = found.subjects;
       } else if (user.value !== null) {
-        subjects.value = await fetchTeacherSubjects(
-          classId.value,
-          user.value.id,
-        );
+        subjects.value = await fetchTeacherSubjects(classId.value, user.value.id);
       }
     } else {
       /* Class not found — could be an invalid URL or teacher doesn't have access */
@@ -191,11 +188,7 @@ function selectSemester(semester: Semester): void {
     <div class="h-8 w-48 animate-pulse rounded bg-gray-200" />
     <div class="h-6 w-32 animate-pulse rounded bg-gray-200" />
     <div class="flex gap-2">
-      <div
-        v-for="n in 3"
-        :key="n"
-        class="h-10 w-24 animate-pulse rounded-lg bg-gray-200"
-      />
+      <div v-for="n in 3" :key="n" class="h-10 w-24 animate-pulse rounded-lg bg-gray-200" />
     </div>
     <div class="h-64 animate-pulse rounded-xl bg-gray-200" />
   </div>
@@ -229,16 +222,20 @@ function selectSemester(semester: Semester): void {
           to="/"
           class="mb-1 inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
         >
-          <svg class="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <svg
+            class="mr-1 h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
           Înapoi
         </NuxtLink>
 
         <!-- Class name and education level badge -->
-        <h1 class="text-2xl font-bold text-gray-900">
-          Clasa {{ currentClass.name }}
-        </h1>
+        <h1 class="text-2xl font-bold text-gray-900">Clasa {{ currentClass.name }}</h1>
         <p class="mt-0.5 text-sm text-gray-500">
           {{ educationLevelLabels[currentClass.educationLevel] ?? currentClass.educationLevel }}
           &middot;
@@ -297,11 +294,7 @@ function selectSemester(semester: Semester): void {
         >
           {{ subject.name }}
           <!-- Show thesis indicator if the subject has a thesis exam -->
-          <span
-            v-if="subject.hasThesis"
-            class="ml-1 text-xs text-gray-400"
-            title="Materie cu teză"
-          >
+          <span v-if="subject.hasThesis" class="ml-1 text-xs text-gray-400" title="Materie cu teză">
             (T)
           </span>
         </button>
@@ -309,13 +302,8 @@ function selectSemester(semester: Semester): void {
     </div>
 
     <!-- No subjects assigned to this teacher -->
-    <div
-      v-else
-      class="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center"
-    >
-      <p class="text-sm text-gray-500">
-        Nu aveți materii asignate la această clasă.
-      </p>
+    <div v-else class="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center">
+      <p class="text-sm text-gray-500">Nu aveți materii asignate la această clasă.</p>
       <NuxtLink
         to="/"
         class="mt-2 inline-block text-sm font-medium text-blue-600 hover:text-blue-800"

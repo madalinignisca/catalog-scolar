@@ -240,15 +240,11 @@ export function useCatalog() {
     currentUserId: string,
   ): Promise<TeacherSubject[]> {
     try {
-      const response = await api<ClassTeachersResponse>(
-        `/classes/${classId}/teachers`,
-      );
+      const response = await api<ClassTeachersResponse>(`/classes/${classId}/teachers`);
 
       /* Find the current teacher in the list of teachers for this class.
        * The API returns all teachers for the class, so we filter by ID. */
-      const myAssignment = response.data.find(
-        (t) => t.teacherId === currentUserId,
-      );
+      const myAssignment = response.data.find((t) => t.teacherId === currentUserId);
 
       return myAssignment?.subjects ?? [];
     } catch (e: unknown) {
@@ -369,10 +365,7 @@ export function useCatalog() {
    * @param payload - The fields to update
    * @returns The updated grade from the server, or null on error
    */
-  async function updateGrade(
-    gradeId: string,
-    payload: UpdateGradePayload,
-  ): Promise<Grade | null> {
+  async function updateGrade(gradeId: string, payload: UpdateGradePayload): Promise<Grade | null> {
     error.value = null;
 
     const clientTimestamp = new Date().toISOString();
@@ -389,10 +382,10 @@ export function useCatalog() {
     try {
       if (isOnline.value) {
         /* Online: update directly on server */
-        const response = await api<GradeResponse>(
-          `/catalog/grades/${gradeId}`,
-          { method: 'PUT', body },
-        );
+        const response = await api<GradeResponse>(`/catalog/grades/${gradeId}`, {
+          method: 'PUT',
+          body,
+        });
 
         /* Enqueue for sync safety */
         await enqueueMutation('grade', 'update', {

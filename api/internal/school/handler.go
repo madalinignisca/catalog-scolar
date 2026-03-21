@@ -144,11 +144,11 @@ func (h *Handler) GetCurrentSchool(w http.ResponseWriter, r *http.Request) {
 
 // classListItem is the JSON shape for each class in the GET /classes response.
 type classListItem struct {
-	ID              uuid.UUID  `json:"id"`
-	Name            string     `json:"name"`
-	EducationLevel  string     `json:"education_level"`
-	GradeNumber     int16      `json:"grade_number"`
-	MaxStudents     *int16     `json:"max_students"`
+	ID              uuid.UUID     `json:"id"`
+	Name            string        `json:"name"`
+	EducationLevel  string        `json:"education_level"`
+	GradeNumber     int16         `json:"grade_number"`
+	MaxStudents     *int16        `json:"max_students"`
 	HomeroomTeacher *teacherBrief `json:"homeroom_teacher"`
 }
 
