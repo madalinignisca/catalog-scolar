@@ -141,7 +141,6 @@ export const test = base.extend<AppFixtures>({
    * A Playwright Page already logged in as the student (the most basic
    * authenticated role). Use this for tests that just need "any logged-in user".
    */
-  // eslint-disable-next-line no-empty-pattern
   authenticatedPage: async ({ page }, use) => {
     // Perform the login flow using student credentials.
     await performLogin(page, TEST_USERS.student.email, TEST_USERS.student.password);
@@ -159,7 +158,6 @@ export const test = base.extend<AppFixtures>({
    * will appear. The fixture does not handle TOTP — extend it once the
    * TOTP mock/handler is available.
    */
-  // eslint-disable-next-line no-empty-pattern
   teacherPage: async ({ page }, use) => {
     await performLogin(page, TEST_USERS.teacher.email, TEST_USERS.teacher.password);
     await use(page);
@@ -171,7 +169,6 @@ export const test = base.extend<AppFixtures>({
    * A Page logged in as the school admin.
    * Same TOTP caveat as teacherPage applies.
    */
-  // eslint-disable-next-line no-empty-pattern
   adminPage: async ({ page }, use) => {
     await performLogin(page, TEST_USERS.admin.email, TEST_USERS.admin.password);
     await use(page);
@@ -184,7 +181,6 @@ export const test = base.extend<AppFixtures>({
    * Parents do not require 2FA, so this fixture should work end-to-end once
    * the API auth handler is implemented.
    */
-  // eslint-disable-next-line no-empty-pattern
   parentPage: async ({ page }, use) => {
     await performLogin(page, TEST_USERS.parent.email, TEST_USERS.parent.password);
     await use(page);
