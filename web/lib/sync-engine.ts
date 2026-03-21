@@ -13,8 +13,12 @@ const MAX_DELAY = 30000;
  * Listens for online/offline events and triggers sync.
  */
 export function initSyncEngine(): void {
-  window.addEventListener('online', () => scheduleSyncSoon());
-  window.addEventListener('offline', () => cancelScheduledSync());
+  window.addEventListener('online', () => {
+    scheduleSyncSoon();
+  });
+  window.addEventListener('offline', () => {
+    cancelScheduledSync();
+  });
 
   // Try sync on init if online
   if (navigator.onLine) {
@@ -27,11 +31,13 @@ export function initSyncEngine(): void {
  */
 export function scheduleSyncSoon(): void {
   cancelScheduledSync();
-  syncTimer = setTimeout(() => flushQueue(), 500);
+  syncTimer = setTimeout(() => {
+    void flushQueue();
+  }, 500);
 }
 
 function cancelScheduledSync(): void {
-  if (syncTimer) {
+  if (syncTimer !== null) {
     clearTimeout(syncTimer);
     syncTimer = null;
   }
@@ -85,13 +91,17 @@ async function flushQueue(): Promise<void> {
     // Process results
     for (const result of response.results) {
       const mutation = pending.find((m) => m.clientId === result.client_id);
-      if (!mutation?.id) continue;
+      if (mutation?.id === undefined) continue;
 
       if (result.status === 'synced' || result.status === 'conflict') {
         await queue.markSynced(mutation.id);
 
         // Update local cache with server ID
-        if (result.server_id && mutation.entityType === 'grade') {
+        if (
+          result.server_id !== undefined &&
+          result.server_id !== '' &&
+          mutation.entityType === 'grade'
+        ) {
           await db.grades.where('id').equals(mutation.clientId).modify({
             id: result.server_id,
             serverId: result.server_id,
@@ -103,7 +113,7 @@ async function flushQueue(): Promise<void> {
     }
 
     // Update last sync timestamp
-    if (response.server_timestamp) {
+    if (response.server_timestamp !== '') {
       await db.syncMeta.put({ key: 'lastSyncAt', value: response.server_timestamp });
     }
   } catch (error) {
@@ -116,8 +126,11 @@ async function flushQueue(): Promise<void> {
     }
 
     // Schedule retry with backoff
-    const delay = Math.min(BASE_DELAY * Math.pow(2, pending[0]?.attempts ?? 0), MAX_DELAY);
-    syncTimer = setTimeout(() => flushQueue(), delay);
+    const firstAttempts = pending[0]?.attempts ?? 0;
+    const delay = Math.min(BASE_DELAY * Math.pow(2, firstAttempts), MAX_DELAY);
+    syncTimer = setTimeout(() => {
+      void flushQueue();
+    }, delay);
   } finally {
     syncing = false;
   }
@@ -137,7 +150,7 @@ interface SyncPushResponse {
 
 async function getDeviceId(): Promise<string> {
   const existing = await db.syncMeta.get('deviceId');
-  if (existing) return existing.value;
+  if (existing !== undefined) return existing.value;
 
   const deviceId = crypto.randomUUID();
   await db.syncMeta.put({ key: 'deviceId', value: deviceId });

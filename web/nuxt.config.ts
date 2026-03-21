@@ -1,14 +1,15 @@
+const apiBase: string =
+  (process as unknown as { env: Record<string, string | undefined> }).env['NUXT_PUBLIC_API_BASE'] ??
+  'http://localhost:8080/api/v1';
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-03-01',
 
-  modules: [
-    '@nuxtjs/tailwindcss',
-    '@vite-pwa/nuxt',
-  ],
+  modules: ['@nuxtjs/tailwindcss', '@vite-pwa/nuxt'],
 
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:8080/api/v1',
+      apiBase,
     },
   },
 
@@ -60,4 +61,4 @@ export default defineNuxtConfig({
   },
 
   devtools: { enabled: true },
-})
+});

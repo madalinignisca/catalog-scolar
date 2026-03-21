@@ -18,11 +18,14 @@ interface LoginResponse {
 }
 
 const user = ref<User | null>(null);
-const isAuthenticated = computed(() => !!user.value);
+const isAuthenticated = computed(() => user.value !== null);
 const isLoading = ref(false);
 
 export function useAuth() {
-  async function login(email: string, password: string): Promise<{ mfaRequired: boolean; mfaToken?: string }> {
+  async function login(
+    email: string,
+    password: string,
+  ): Promise<{ mfaRequired: boolean; mfaToken?: string }> {
     isLoading.value = true;
     try {
       const data = await api<LoginResponse>('/auth/login', {
@@ -31,7 +34,7 @@ export function useAuth() {
         skipAuth: true,
       });
 
-      if (data.mfa_required && data.mfa_token) {
+      if (data.mfa_required === true && data.mfa_token !== undefined && data.mfa_token !== '') {
         return { mfaRequired: true, mfaToken: data.mfa_token };
       }
 
@@ -64,7 +67,8 @@ export function useAuth() {
   }
 
   async function fetchProfile(): Promise<void> {
-    if (!getAccessToken()) return;
+    const token = getAccessToken();
+    if (token === null || token === '') return;
     try {
       const data = await api<{ data: User }>('/users/me');
       user.value = data.data;
@@ -74,7 +78,7 @@ export function useAuth() {
   }
 
   function requireRole(...roles: User['role'][]): boolean {
-    return !!user.value && roles.includes(user.value.role);
+    return user.value !== null && roles.includes(user.value.role);
   }
 
   return {

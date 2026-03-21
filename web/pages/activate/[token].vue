@@ -2,9 +2,11 @@
 definePageMeta({ layout: false });
 
 const route = useRoute();
-const token = route.params.token as string;
+const token = route.params['token'] as string;
 
-const state = ref<'loading' | 'ready' | 'setting_password' | 'setting_2fa' | 'done' | 'error'>('loading');
+const state = ref<'loading' | 'ready' | 'setting_password' | 'setting_2fa' | 'done' | 'error'>(
+  'loading',
+);
 const error = ref('');
 
 // Pre-populated data from server
@@ -32,9 +34,7 @@ const loading = ref(false);
 
 onMounted(async () => {
   try {
-    const data = await $fetch<{ data: typeof userData.value }>(
-      `/api/v1/auth/activate/${token}`,
-    );
+    const data = await $fetch<{ data: typeof userData.value }>(`/api/v1/auth/activate/${token}`);
     userData.value = data.data;
     state.value = 'ready';
   } catch {
@@ -52,7 +52,7 @@ async function handleActivate() {
     error.value = 'Parola trebuie să aibă minim 8 caractere';
     return;
   }
-  if (userData.value?.requiresGdpr && !gdprConsent.value) {
+  if (userData.value?.requiresGdpr === true && !gdprConsent.value) {
     error.value = 'Trebuie să acceptați termenii GDPR pentru a continua';
     return;
   }
@@ -66,8 +66,8 @@ async function handleActivate() {
       token,
       password: password.value,
     };
-    if (userData.value?.requiresGdpr) {
-      body.gdpr_consent = true;
+    if (userData.value?.requiresGdpr === true) {
+      body['gdpr_consent'] = true;
     }
 
     const response = await $fetch<{
@@ -79,24 +79,31 @@ async function handleActivate() {
       body,
     });
 
-    if (response.mfa_setup_required) {
+    if (response.mfa_setup_required === true) {
       // Fetch TOTP setup
       const setup = await $fetch<{ data: { secret: string; qr_code: string } }>(
         '/api/v1/auth/2fa/setup',
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${response.access_token}` },
+          headers: { Authorization: `Bearer ${response.access_token ?? ''}` },
         },
       );
       totpSecret.value = setup.data.secret;
       totpQr.value = setup.data.qr_code;
       state.value = 'setting_2fa';
-    } else if (response.access_token && response.refresh_token) {
+    } else if (
+      response.access_token !== undefined &&
+      response.access_token !== '' &&
+      response.refresh_token !== undefined &&
+      response.refresh_token !== ''
+    ) {
       // Direct login (parents/students)
       const { setTokens } = await import('~/lib/api');
       setTokens(response.access_token, response.refresh_token);
       state.value = 'done';
-      setTimeout(() => navigateTo('/'), 2000);
+      setTimeout(() => {
+        void navigateTo('/');
+      }, 2000);
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Eroare la activare';
@@ -122,7 +129,9 @@ async function handleVerify2fa() {
     const { setTokens } = await import('~/lib/api');
     setTokens(response.access_token, response.refresh_token);
     state.value = 'done';
-    setTimeout(() => navigateTo('/'), 2000);
+    setTimeout(() => {
+      void navigateTo('/');
+    }, 2000);
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Cod invalid';
   } finally {
@@ -154,7 +163,9 @@ const roleLabels: Record<string, string> = {
 
       <!-- Error -->
       <div v-else-if="state === 'error'" class="py-8 text-center">
-        <p class="text-red-600">{{ error }}</p>
+        <p class="text-red-600">
+          {{ error }}
+        </p>
         <NuxtLink to="/login" class="mt-4 inline-block text-sm text-blue-600 hover:underline">
           Înapoi la autentificare
         </NuxtLink>
@@ -170,15 +181,20 @@ const roleLabels: Record<string, string> = {
               <span class="font-medium">Nume:</span> {{ userData.firstName }}
               {{ userData.lastName }}
             </p>
-            <p><span class="font-medium">Rol:</span> {{ roleLabels[userData.role] ?? userData.role }}</p>
+            <p>
+              <span class="font-medium">Rol:</span> {{ roleLabels[userData.role] ?? userData.role }}
+            </p>
             <p><span class="font-medium">Școala:</span> {{ userData.schoolName }}</p>
           </div>
         </div>
 
-        <form @submit.prevent="handleActivate" class="space-y-4">
+        <form class="space-y-4" @submit.prevent="handleActivate">
           <div>
-            <label class="block text-sm font-medium text-gray-700">Parolă nouă</label>
+            <label for="activate-password" class="block text-sm font-medium text-gray-700"
+              >Parolă nouă</label
+            >
             <input
+              id="activate-password"
               v-model="password"
               type="password"
               required
@@ -188,8 +204,11 @@ const roleLabels: Record<string, string> = {
             />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700">Confirmă parola</label>
+            <label for="activate-password-confirm" class="block text-sm font-medium text-gray-700"
+              >Confirmă parola</label
+            >
             <input
+              id="activate-password-confirm"
               v-model="passwordConfirm"
               type="password"
               required
@@ -233,8 +252,8 @@ const roleLabels: Record<string, string> = {
       <div v-else-if="state === 'setting_2fa'">
         <div class="mb-4 text-center">
           <p class="text-sm text-gray-600">
-            Contul dumneavoastră necesită autentificare cu doi factori (2FA).
-            Scanați codul QR cu aplicația de autentificare.
+            Contul dumneavoastră necesită autentificare cu doi factori (2FA). Scanați codul QR cu
+            aplicația de autentificare.
           </p>
         </div>
 
@@ -246,10 +265,13 @@ const roleLabels: Record<string, string> = {
           Sau introduceți manual: <code class="text-gray-600">{{ totpSecret }}</code>
         </p>
 
-        <form @submit.prevent="handleVerify2fa" class="space-y-4">
+        <form class="space-y-4" @submit.prevent="handleVerify2fa">
           <div>
-            <label class="block text-sm font-medium text-gray-700">Cod verificare</label>
+            <label for="totp-verify" class="block text-sm font-medium text-gray-700"
+              >Cod verificare</label
+            >
             <input
+              id="totp-verify"
               v-model="totpCode"
               type="text"
               inputmode="numeric"
@@ -274,9 +296,16 @@ const roleLabels: Record<string, string> = {
 
       <!-- Done -->
       <div v-else-if="state === 'done'" class="py-8 text-center">
-        <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
+        <div
+          class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100"
+        >
           <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M5 13l4 4L19 7"
+            />
           </svg>
         </div>
         <p class="text-lg font-semibold text-gray-900">Cont activat cu succes!</p>

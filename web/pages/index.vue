@@ -4,7 +4,7 @@ const { isOnline, pendingMutations } = useOfflineSync();
 
 // Redirect to login if not authenticated
 if (import.meta.client && !isAuthenticated.value) {
-  navigateTo('/login');
+  void navigateTo('/login');
 }
 </script>
 
@@ -40,8 +40,8 @@ if (import.meta.client && !isAuthenticated.value) {
             </span>
           </span>
           <button
-            @click="logout().then(() => navigateTo('/login'))"
             class="text-sm text-gray-500 hover:text-gray-700"
+            @click="logout().then(() => navigateTo('/login'))"
           >
             Ieșire
           </button>
@@ -80,7 +80,7 @@ if (import.meta.client && !isAuthenticated.value) {
             to="/admin/classes"
             class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm hover:shadow-md"
           >
-            <h3 class="font-semibold text-gray-900">Clase & Materii</h3>
+            <h3 class="font-semibold text-gray-900">Clase &amp; Materii</h3>
             <p class="mt-1 text-sm text-gray-500">Încadrare, formațiuni de studiu</p>
           </NuxtLink>
           <NuxtLink

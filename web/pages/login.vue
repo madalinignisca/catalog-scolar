@@ -17,11 +17,11 @@ async function handleLogin() {
 
   try {
     const result = await login(email.value, password.value);
-    if (result.mfaRequired && result.mfaToken) {
+    if (result.mfaRequired && result.mfaToken !== undefined && result.mfaToken !== '') {
       mfaRequired.value = true;
       mfaToken.value = result.mfaToken;
     } else {
-      navigateTo('/');
+      await navigateTo('/');
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Autentificare eșuată';
@@ -36,7 +36,7 @@ async function handleMfa() {
 
   try {
     await verifyMfa(mfaToken.value, totpCode.value);
-    navigateTo('/');
+    await navigateTo('/');
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Cod invalid';
   } finally {
@@ -54,7 +54,7 @@ async function handleMfa() {
       </div>
 
       <!-- Login form -->
-      <form v-if="!mfaRequired" @submit.prevent="handleLogin" class="space-y-4">
+      <form v-if="!mfaRequired" class="space-y-4" @submit.prevent="handleLogin">
         <div>
           <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
           <input
@@ -90,7 +90,7 @@ async function handleMfa() {
       </form>
 
       <!-- MFA form -->
-      <form v-else @submit.prevent="handleMfa" class="space-y-4">
+      <form v-else class="space-y-4" @submit.prevent="handleMfa">
         <p class="text-sm text-gray-600">
           Introduceți codul din aplicația de autentificare (Google Authenticator, Authy etc.)
         </p>
@@ -120,8 +120,11 @@ async function handleMfa() {
         </button>
         <button
           type="button"
-          @click="mfaRequired = false; mfaToken = ''"
           class="w-full text-sm text-gray-500 hover:text-gray-700"
+          @click="
+            mfaRequired = false;
+            mfaToken = '';
+          "
         >
           ← Înapoi la autentificare
         </button>

@@ -8,9 +8,14 @@ const REFRESH_KEY = 'catalogro_refresh_token';
 
 function getApiBase(): string {
   if (import.meta.client) {
-    return useRuntimeConfig().public.apiBase as string;
+    return useRuntimeConfig().public.apiBase;
   }
-  return process.env.NUXT_PUBLIC_API_BASE ?? 'http://localhost:8080/api/v1';
+  // Server-side: process.env is available via Node but not typed by @types/node in this project.
+
+  const envBase = (process as unknown as { env: Record<string, string | undefined> }).env[
+    'NUXT_PUBLIC_API_BASE'
+  ];
+  return envBase !== undefined && envBase !== '' ? envBase : 'http://localhost:8080/api/v1';
 }
 
 export function getAccessToken(): string | null {
@@ -37,6 +42,18 @@ interface ApiOptions {
   skipAuth?: boolean;
 }
 
+interface ApiErrorBody {
+  error?: {
+    code?: string;
+    message?: string;
+  };
+}
+
+interface RefreshResponse {
+  access_token: string;
+  refresh_token: string;
+}
+
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const base = getApiBase();
   const url = `${base}${path}`;
@@ -48,7 +65,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
 
   if (!options.skipAuth) {
     const token = getAccessToken();
-    if (token) {
+    if (token !== null && token !== '') {
       headers['Authorization'] = `Bearer ${token}`;
     }
   }
@@ -56,7 +73,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   const response = await fetch(url, {
     method: options.method ?? 'GET',
     headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
   // Token expired — try refresh
@@ -73,8 +90,14 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
-    throw new ApiError(response.status, error.error?.code ?? 'UNKNOWN', error.error?.message ?? 'Request failed');
+    const errorBody = (await response
+      .json()
+      .catch(() => ({ error: { message: response.statusText } }))) as ApiErrorBody;
+    throw new ApiError(
+      response.status,
+      errorBody.error?.code ?? 'UNKNOWN',
+      errorBody.error?.message ?? 'Request failed',
+    );
   }
 
   return response.json() as Promise<T>;
@@ -83,7 +106,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
 async function tryRefreshToken(): Promise<boolean> {
   if (!import.meta.client) return false;
   const refreshToken = localStorage.getItem(REFRESH_KEY);
-  if (!refreshToken) return false;
+  if (refreshToken === null || refreshToken === '') return false;
 
   try {
     const base = getApiBase();
@@ -95,7 +118,7 @@ async function tryRefreshToken(): Promise<boolean> {
 
     if (!response.ok) return false;
 
-    const data = await response.json();
+    const data = (await response.json()) as RefreshResponse;
     setTokens(data.access_token, data.refresh_token);
     return true;
   } catch {

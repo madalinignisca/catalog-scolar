@@ -12,11 +12,15 @@ export function useOfflineSync() {
     initialized = true;
 
     isOnline.value = navigator.onLine;
-    window.addEventListener('online', () => { isOnline.value = true; });
-    window.addEventListener('offline', () => { isOnline.value = false; });
+    window.addEventListener('online', () => {
+      isOnline.value = true;
+    });
+    window.addEventListener('offline', () => {
+      isOnline.value = false;
+    });
 
     initSyncEngine();
-    refreshPendingCount();
+    void refreshPendingCount();
   }
 
   async function refreshPendingCount(): Promise<void> {
