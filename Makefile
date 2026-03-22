@@ -19,8 +19,9 @@ dev: ## Start all services + API + web dev servers
 	docker compose up -d
 	@echo "Waiting for postgres..."
 	@until docker compose exec -T postgres pg_isready -U catalogro > /dev/null 2>&1; do sleep 1; done
-	@echo "Services ready. Starting API and web..."
+	@echo "Services ready. Running migrations and generating code..."
 	$(MAKE) migrate
+	$(MAKE) sqlc
 	@trap 'kill 0' INT; \
 		(cd api && go run ./cmd/server) & \
 		(cd web && npm run dev) & \
