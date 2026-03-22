@@ -8,6 +8,12 @@ REDIS_URL    ?= redis://localhost:6379/0
 GOOSE_DIR     = api/db/migrations
 SEED_FILE     = api/db/seed.sql
 
+# ── Tool versions (pinned in api/go.mod via tools.go) ──────
+# Using `go run` ensures every environment uses the exact same
+# version from go.sum — no global installs, no version mismatch.
+GOOSE = cd api && go run github.com/pressly/goose/v3/cmd/goose
+SQLC  = cd api && go run github.com/sqlc-dev/sqlc/cmd/sqlc
+
 # ── Development ─────────────────────────────────────────────
 dev: ## Start all services + API + web dev servers
 	docker compose up -d
@@ -28,19 +34,19 @@ dev-web: ## Start only Nuxt dev server
 
 # ── Database ────────────────────────────────────────────────
 migrate: ## Run all pending migrations
-	cd api && goose -dir db/migrations postgres "$(DATABASE_URL)" up
+	$(GOOSE) -dir db/migrations postgres "$(DATABASE_URL)" up
 
 migrate-down: ## Rollback last migration
-	cd api && goose -dir db/migrations postgres "$(DATABASE_URL)" down
+	$(GOOSE) -dir db/migrations postgres "$(DATABASE_URL)" down
 
 migrate-status: ## Show migration status
-	cd api && goose -dir db/migrations postgres "$(DATABASE_URL)" status
+	$(GOOSE) -dir db/migrations postgres "$(DATABASE_URL)" status
 
 migrate-create: ## Create new migration (usage: make migrate-create NAME=add_schedule)
-	cd api && goose -dir db/migrations create $(NAME) sql
+	$(GOOSE) -dir db/migrations create $(NAME) sql
 
 sqlc: ## Regenerate sqlc Go code from queries
-	cd api && sqlc generate
+	$(SQLC) generate
 
 seed: ## Load seed data (2 test schools)
 	psql "$(DATABASE_URL)" -f $(SEED_FILE)
