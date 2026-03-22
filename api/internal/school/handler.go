@@ -125,20 +125,14 @@ func (h *Handler) GetCurrentSchool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Map the database model to the API response struct.
-	// We convert the education_levels from the generated enum slice to plain strings
-	// so the JSON output is clean (e.g. ["primary","middle"] instead of typed enums).
-	levels := make([]string, len(school.EducationLevels))
-	for i, l := range school.EducationLevels {
-		levels[i] = string(l)
-	}
-
-	// Step 4: Send the response wrapped in the standard { "data": { ... } } envelope.
+	// Step 3: Send the response wrapped in the standard { "data": { ... } } envelope.
+	// Note: education_levels is omitted from the query (array type needs custom pgx
+	// registration). It can be added later when the school settings page needs it.
 	httputil.Success(w, schoolResponse{
 		ID:              school.ID,
 		Name:            school.Name,
 		SiiirCode:       school.SiiirCode,
-		EducationLevels: levels,
+		EducationLevels: []string{}, // TODO: add when pgx array type is registered
 		Address:         school.Address,
 		City:            school.City,
 		County:          school.County,
