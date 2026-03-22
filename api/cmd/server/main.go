@@ -119,9 +119,10 @@ func run() error {
 	// Without CORS, the browser blocks cross-origin requests for security.
 	r.Use(cors.Handler(cors.Options{
 		// AllowedOrigins: which frontend origins can call this API.
-		// In development, the Nuxt dev server runs on localhost:3000.
-		// In production, this should be set to the actual domain (e.g., app.catalogro.ro).
-		AllowedOrigins: []string{"http://localhost:3000"},
+		// In development, the Nuxt dev server runs on 0.0.0.0:3000 and is accessed
+		// from both localhost and the VM's LAN IP. We allow all origins in dev mode;
+		// in production this should be locked to the actual domain (e.g., app.catalogro.ro).
+		AllowedOrigins: []string{"http://localhost:3000", "http://*:3000"},
 
 		// AllowedMethods: which HTTP methods are permitted for cross-origin requests.
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},

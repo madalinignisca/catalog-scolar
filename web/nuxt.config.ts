@@ -1,3 +1,6 @@
+// Default API base URL. In the browser, we use the same hostname the page was
+// loaded from (works for both localhost and LAN IP access). On the server side
+// (SSR), we fall back to localhost. Override via NUXT_PUBLIC_API_BASE env var.
 const apiBase: string =
   (process as unknown as { env: Record<string, string | undefined> }).env['NUXT_PUBLIC_API_BASE'] ??
   'http://localhost:8080/api/v1';
@@ -61,4 +64,11 @@ export default defineNuxtConfig({
   },
 
   devtools: { enabled: true },
+
+  // Listen on all interfaces so the dev server is accessible from
+  // other machines on the local network (e.g. laptop → VM).
+  devServer: {
+    host: '0.0.0.0',
+    port: 3000,
+  },
 });
