@@ -107,7 +107,14 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     );
   }
 
-  return response.json() as Promise<T>;
+  // The API wraps all success responses in { "data": ... }. Unwrap the envelope
+  // so callers get the inner payload directly (e.g., api<User>('/users/me')
+  // returns the User object, not { data: User }).
+  const body: unknown = await response.json();
+  if (typeof body === 'object' && body !== null && 'data' in body) {
+    return (body as Record<string, unknown>)['data'] as T;
+  }
+  return body as T;
 }
 
 async function tryRefreshToken(): Promise<boolean> {
@@ -125,7 +132,13 @@ async function tryRefreshToken(): Promise<boolean> {
 
     if (!response.ok) return false;
 
-    const data = (await response.json()) as RefreshResponse;
+    // Unwrap the { data: ... } envelope, same as the main api() function
+    const body: unknown = await response.json();
+    const inner =
+      typeof body === 'object' && body !== null && 'data' in body
+        ? (body as Record<string, unknown>)['data']
+        : body;
+    const data = inner as RefreshResponse;
     setTokens(data.access_token, data.refresh_token);
     return true;
   } catch {
