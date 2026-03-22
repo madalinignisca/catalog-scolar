@@ -97,10 +97,20 @@ func (h *Handler) GetCurrentSchool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context.
+	// This Queries object is bound to a PostgreSQL transaction that has the
+	// RLS tenant variable (app.current_school_id) already set, so all queries
+	// through it are automatically filtered to the current school.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Query the database for the current tenant's school.
 	// GetSchoolByCurrentTenant uses current_school_id() in the SQL, which reads
 	// the PostgreSQL session variable set by the tenant middleware.
-	school, err := h.queries.GetSchoolByCurrentTenant(r.Context())
+	school, err := queries.GetSchoolByCurrentTenant(r.Context())
 	if err != nil {
 		// If no rows are found, the tenant ID in the JWT does not match any school.
 		// This could indicate a deleted school or a corrupted token.
@@ -184,10 +194,18 @@ func (h *Handler) ListClasses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Get the current school year. Classes are always scoped to a school year.
 	// If the school has not configured a current school year, we return an empty list
 	// rather than an error, because this is a valid (albeit incomplete) configuration.
-	schoolYear, err := h.queries.GetCurrentSchoolYear(r.Context())
+	schoolYear, err := queries.GetCurrentSchoolYear(r.Context())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// No current school year configured — return empty class list.
@@ -206,7 +224,7 @@ func (h *Handler) ListClasses(w http.ResponseWriter, r *http.Request) {
 
 	if role == "teacher" {
 		// For teachers: query only their assigned classes.
-		rows, err := h.queries.ListClassesByTeacher(r.Context(), generated.ListClassesByTeacherParams{
+		rows, err := queries.ListClassesByTeacher(r.Context(), generated.ListClassesByTeacherParams{
 			TeacherID:    userID,
 			SchoolYearID: schoolYear.ID,
 		})
@@ -235,7 +253,7 @@ func (h *Handler) ListClasses(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// For admins, secretaries, parents, students: query all classes in the school year.
-		rows, err := h.queries.ListClassesBySchoolYear(r.Context(), schoolYear.ID)
+		rows, err := queries.ListClassesBySchoolYear(r.Context(), schoolYear.ID)
 		if err != nil {
 			h.logger.Error("failed to list classes", "error", err)
 			httputil.InternalError(w)
@@ -307,6 +325,14 @@ func (h *Handler) GetClass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the class ID from the URL path parameter.
 	// chi.URLParam extracts named parameters from the route (e.g. {classId}).
 	classIDStr := chi.URLParam(r, "classId")
@@ -317,7 +343,7 @@ func (h *Handler) GetClass(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Fetch the class from the database.
-	cls, err := h.queries.GetClassByID(r.Context(), classID)
+	cls, err := queries.GetClassByID(r.Context(), classID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.NotFound(w, "Class not found")
@@ -329,7 +355,7 @@ func (h *Handler) GetClass(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 4: Fetch the enrolled students for this class.
-	studentRows, err := h.queries.ListStudentsByClass(r.Context(), classID)
+	studentRows, err := queries.ListStudentsByClass(r.Context(), classID)
 	if err != nil {
 		h.logger.Error("failed to list students for class", "error", err, "class_id", classID)
 		httputil.InternalError(w)
@@ -402,6 +428,14 @@ func (h *Handler) ListTeachers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the class ID from the URL.
 	classIDStr := chi.URLParam(r, "classId")
 	classID, err := uuid.Parse(classIDStr)
@@ -411,7 +445,7 @@ func (h *Handler) ListTeachers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Fetch teacher assignments from the database.
-	rows, err := h.queries.ListTeachersByClass(r.Context(), classID)
+	rows, err := queries.ListTeachersByClass(r.Context(), classID)
 	if err != nil {
 		h.logger.Error("failed to list teachers for class", "error", err, "class_id", classID)
 		httputil.InternalError(w)
@@ -465,8 +499,16 @@ func (h *Handler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Fetch all active subjects from the database.
-	rows, err := h.queries.ListSubjectsBySchool(r.Context())
+	rows, err := queries.ListSubjectsBySchool(r.Context())
 	if err != nil {
 		h.logger.Error("failed to list subjects", "error", err)
 		httputil.InternalError(w)
