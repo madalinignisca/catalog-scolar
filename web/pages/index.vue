@@ -40,6 +40,13 @@ const { user, isAuthenticated } = useAuth();
 const { classes, fetchClasses, isLoading, error } = useCatalog();
 
 /**
+ * Track whether the initial page load is still in progress.
+ * While true, the template shows a loading spinner instead of role-based content.
+ * This prevents the "flash of fallback content" before fetchProfile completes.
+ */
+const pageLoading = ref(true);
+
+/**
  * On mount: check authentication and load data.
  *
  * We do this in onMounted (not at setup time) because:
@@ -66,6 +73,9 @@ onMounted(async () => {
   if (user.value?.role === 'teacher') {
     await fetchClasses();
   }
+
+  // Page is ready — show the role-based content
+  pageLoading.value = false;
 });
 
 /**
@@ -91,10 +101,22 @@ function openClass(classItem: TeacherClass): void {
 
 <template>
   <!-- ================================================================== -->
+  <!-- LOADING STATE: shown while fetchProfile is in progress             -->
+  <!-- ================================================================== -->
+  <div v-if="pageLoading" class="flex items-center justify-center py-20">
+    <div class="text-center">
+      <div
+        class="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"
+      />
+      <p class="mt-4 text-sm text-gray-500">Se încarcă...</p>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
   <!-- TEACHER DASHBOARD                                                  -->
   <!-- Shows a grid of class cards when the user is a teacher.            -->
   <!-- ================================================================== -->
-  <div v-if="user?.role === 'teacher'" class="space-y-6">
+  <div v-else-if="user?.role === 'teacher'" class="space-y-6">
     <!-- Page heading -->
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Tablou de bord</h1>

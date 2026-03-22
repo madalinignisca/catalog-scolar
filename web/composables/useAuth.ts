@@ -70,8 +70,8 @@ export function useAuth() {
     const token = getAccessToken();
     if (token === null || token === '') return;
     try {
-      const data = await api<{ data: User }>('/users/me');
-      user.value = data.data;
+      // api() auto-unwraps the { data: ... } envelope, so we get User directly
+      user.value = await api<User>('/users/me');
     } catch {
       user.value = null;
     }
