@@ -45,7 +45,7 @@ INSERT INTO users (id, school_id, role, email, first_name, last_name, password_h
      'director@scoala-rebreanu.ro',
      'Maria', 'Popescu',
      -- password: "catalog2026" (bcrypt)
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), now());
 
 -- Secretary
@@ -55,7 +55,7 @@ INSERT INTO users (id, school_id, role, email, first_name, last_name, password_h
      'secretary',
      'secretar@scoala-rebreanu.ro',
      'Elena', 'Ionescu',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(),
      'u1000000-0000-0000-0000-000000000001');
 
@@ -65,19 +65,19 @@ INSERT INTO users (id, school_id, role, email, first_name, last_name, password_h
      'a0000000-0000-0000-0000-000000000001',
      'teacher', 'ana.dumitrescu@scoala-rebreanu.ro',
      'Ana', 'Dumitrescu',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), 'u1000000-0000-0000-0000-000000000002'),
     ('u1000000-0000-0000-0000-000000000011',
      'a0000000-0000-0000-0000-000000000001',
      'teacher', 'ion.vasilescu@scoala-rebreanu.ro',
      'Ion', 'Vasilescu',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), 'u1000000-0000-0000-0000-000000000002'),
     ('u1000000-0000-0000-0000-000000000012',
      'a0000000-0000-0000-0000-000000000001',
      'teacher', 'gabriela.marin@scoala-rebreanu.ro',
      'Gabriela', 'Marin',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), 'u1000000-0000-0000-0000-000000000002');
 
 -- Classes: 2A (primar), 6B (gimnaziu)
@@ -138,8 +138,8 @@ INSERT INTO class_enrollments (school_id, class_id, student_id) VALUES
 
 -- Parents with children linked (activated, with GDPR consent)
 INSERT INTO users (id, school_id, role, email, phone, first_name, last_name, password_hash, activated_at, gdpr_consent_at, provisioned_by) VALUES
-    ('u1000000-0000-0000-0000-000000000301', 'a0000000-0000-0000-0000-000000000001', 'parent', 'ion.moldovan@gmail.com', '0741-100-001', 'Ion', 'Moldovan', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', now(), now(), 'u1000000-0000-0000-0000-000000000002'),
-    ('u1000000-0000-0000-0000-000000000302', 'a0000000-0000-0000-0000-000000000001', 'parent', 'cristina.pop@yahoo.com', '0741-200-001', 'Cristina', 'Pop', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', now(), now(), 'u1000000-0000-0000-0000-000000000002');
+    ('u1000000-0000-0000-0000-000000000301', 'a0000000-0000-0000-0000-000000000001', 'parent', 'ion.moldovan@gmail.com', '0741-100-001', 'Ion', 'Moldovan', '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW', now(), now(), 'u1000000-0000-0000-0000-000000000002'),
+    ('u1000000-0000-0000-0000-000000000302', 'a0000000-0000-0000-0000-000000000001', 'parent', 'cristina.pop@yahoo.com', '0741-200-001', 'Cristina', 'Pop', '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW', now(), now(), 'u1000000-0000-0000-0000-000000000002');
 
 INSERT INTO parent_student_links (school_id, parent_id, student_id) VALUES
     ('a0000000-0000-0000-0000-000000000001', 'u1000000-0000-0000-0000-000000000301', 'u1000000-0000-0000-0000-000000000101'),
@@ -198,7 +198,7 @@ INSERT INTO users (id, school_id, role, email, first_name, last_name, password_h
      'admin',
      'director@vianu.ro',
      'Adrian', 'Neagu',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), now());
 
 -- Teachers
@@ -207,13 +207,13 @@ INSERT INTO users (id, school_id, role, email, first_name, last_name, password_h
      'a0000000-0000-0000-0000-000000000002',
      'teacher', 'mihai.stanescu@vianu.ro',
      'Mihai', 'Stănescu',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), 'u2000000-0000-0000-0000-000000000001'),
     ('u2000000-0000-0000-0000-000000000011',
      'a0000000-0000-0000-0000-000000000002',
      'teacher', 'laura.georgescu@vianu.ro',
      'Laura', 'Georgescu',
-     '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
      now(), 'u2000000-0000-0000-0000-000000000001');
 
 -- Class 10A
