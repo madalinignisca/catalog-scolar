@@ -1,0 +1,4 @@
+setups.@nuxt/test-utils="3.23.0"
+telemetry.enabled=false
+telemetry.consent=0
+
