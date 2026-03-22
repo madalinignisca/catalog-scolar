@@ -40,18 +40,29 @@ const { user, isAuthenticated } = useAuth();
 const { classes, fetchClasses, isLoading, error } = useCatalog();
 
 /**
- * Redirect to login if the user is not authenticated.
- * This check runs on the client side only (SSR has no localStorage).
- */
-if (import.meta.client && !isAuthenticated.value) {
-  void navigateTo('/login');
-}
-
-/**
- * On mount: if the user is a teacher, fetch their assigned classes.
- * Other roles don't need this data on the dashboard.
+ * On mount: check authentication and load data.
+ *
+ * We do this in onMounted (not at setup time) because:
+ * 1. localStorage is only available on the client
+ * 2. fetchProfile() is async and needs to complete before we check isAuthenticated
+ * 3. The auth state (user ref) may be empty if this is a fresh page load
+ *    (e.g., after login redirected here, or browser refresh)
  */
 onMounted(async () => {
+  // If user state is empty but we have a token, try to restore the session
+  // by fetching the profile from the API.
+  const { fetchProfile } = useAuth();
+  if (!isAuthenticated.value) {
+    await fetchProfile();
+  }
+
+  // After attempting to restore, if still not authenticated → go to login
+  if (!isAuthenticated.value) {
+    void navigateTo('/login');
+    return;
+  }
+
+  // If the user is a teacher, fetch their assigned classes for the dashboard
   if (user.value?.role === 'teacher') {
     await fetchClasses();
   }

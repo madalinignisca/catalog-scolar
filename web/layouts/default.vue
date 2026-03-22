@@ -40,15 +40,20 @@ const isSidebarOpen = ref(false);
  * 3. Fetch the current school info for the top bar.
  */
 onMounted(async () => {
+  /* If the user profile is not loaded yet (e.g., fresh page load after login,
+   * or browser refresh), try to restore the session from the stored JWT token.
+   * We must do this BEFORE checking isAuthenticated, because the user ref
+   * starts as null on every fresh page load — the token in localStorage is
+   * the real source of truth for "was the user logged in?" */
+  if (user.value === null) {
+    await fetchProfile();
+  }
+
+  /* After attempting to restore the session, if still not authenticated
+   * (no valid token, or token expired and refresh failed), redirect to login. */
   if (!isAuthenticated.value) {
     await navigateTo('/login');
     return;
-  }
-
-  /* If we have a token but no user profile loaded (e.g. page refresh),
-   * fetch the profile from GET /users/me */
-  if (user.value === null) {
-    await fetchProfile();
   }
 
   /* Fetch the school info for display in the navigation bar */
