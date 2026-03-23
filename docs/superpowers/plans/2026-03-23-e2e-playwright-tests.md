@@ -142,13 +142,28 @@ INSERT INTO users (id, school_id, role, email, first_name, last_name, password_h
      now(), 'b1000000-0000-0000-0000-000000000002');
 ```
 
-- [ ] **Step 5: Verify seed applies cleanly**
+- [ ] **Step 5: Add a thesis grade for tests 49 and 57**
+
+```sql
+-- Thesis grade for Alexandru Pop in ROM (middle school, has_thesis=true)
+-- Used by tests 49 (thesis display) and 57 (thesis creation verification)
+INSERT INTO grades (school_id, student_id, class_id, subject_id, teacher_id, school_year_id, semester, numeric_grade, is_thesis, grade_date, description) VALUES
+    ('a0000000-0000-0000-0000-000000000001',
+     'b1000000-0000-0000-0000-000000000201',
+     'f1000000-0000-0000-0000-000000000002',
+     'f1000000-0000-0000-0000-000000000003',
+     'b1000000-0000-0000-0000-000000000011',
+     'e0000000-0000-0000-0000-000000000001',
+     'I', 7, true, '2027-01-15', 'Teză semestrială');
+```
+
+- [ ] **Step 6: Verify seed applies cleanly**
 
 Run:
 ```bash
 cd /home/gabriel/openpublic/catalog-scolar/catalogro
 # Drop and recreate DB, then apply migrations and seed
-docker compose exec -T db psql -U catalogro -c "SELECT 1" && \
+docker compose exec -T postgres psql -U catalogro -c "SELECT 1" && \
   PGPASSWORD=catalogro dropdb -U catalogro -h localhost catalogro --if-exists && \
   PGPASSWORD=catalogro createdb -U catalogro -h localhost catalogro && \
   make migrate && make seed
@@ -156,17 +171,17 @@ docker compose exec -T db psql -U catalogro -c "SELECT 1" && \
 
 Expected: All commands succeed. No errors.
 
-- [ ] **Step 6: Verify TOTP and student data**
+- [ ] **Step 7: Verify TOTP and student data**
 
 Run:
 ```bash
-docker compose exec -T db psql -U catalogro -d catalogro -c \
+docker compose exec -T postgres psql -U catalogro -d catalogro -c \
   "SELECT email, role, totp_enabled, password_hash IS NOT NULL as has_password, activation_token FROM users WHERE school_id = 'a0000000-0000-0000-0000-000000000001' ORDER BY role, email;"
 ```
 
 Expected: admin/secretary/teachers show `totp_enabled=true`. Andrei Moldovan and Alexandru Pop show `has_password=true`. Radu Campean shows `activation_token='test-activation-token-radu'`. Dan Pavel (teacher) exists with TOTP enabled.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add api/db/seed.sql
@@ -217,7 +232,7 @@ Create `web/test/e2e/helpers/totp.ts`:
  * window, we wait for the next window before generating.
  */
 
-import { TOTP } from 'otpauth';
+import { TOTP, Secret } from 'otpauth';
 
 /**
  * The base32-encoded TOTP secret shared by all MFA-enabled test users.
@@ -258,8 +273,9 @@ export async function generateTOTP(secret: string = TEST_TOTP_SECRET): Promise<s
   // - SHA1 algorithm (RFC 6238 default, matches pquerna/otp Go library)
   // - 6 digits
   // - 30-second period
+  // NOTE: otpauth v9+ requires a Secret object, not a raw string.
   const totp = new TOTP({
-    secret,
+    secret: Secret.fromBase32(secret),
     digits: 6,
     period: TOTP_PERIOD,
     algorithm: 'SHA1',
@@ -359,12 +375,13 @@ async function waitForURL(url: string, timeoutMs: number): Promise<void> {
  * @param binary - The binary to execute (e.g., 'make').
  * @param args - Arguments to pass to the binary.
  */
-function runCommand(binary: string, args: string[]): void {
+function runCommand(binary: string, args: string[], env?: NodeJS.ProcessEnv): void {
   console.log(`[global-setup] Running: ${binary} ${args.join(' ')}`);
   execFileSync(binary, args, {
     cwd: PROJECT_ROOT,
     stdio: 'inherit',
     timeout: 120_000,
+    env: env ?? process.env,
   });
 }
 
@@ -377,20 +394,36 @@ function runCommand(binary: string, args: string[]): void {
 async function globalSetup(): Promise<void> {
   console.log('[global-setup] Resetting database...');
 
+  // Terminate any active connections to the database before dropping it.
+  // Without this, dropdb fails if the API server or other clients are connected.
+  // Uses psql with PGPASSWORD to authenticate against the Docker-hosted PostgreSQL.
+  const pgEnv = { ...process.env, PGPASSWORD: 'catalogro' };
+
+  try {
+    execFileSync('psql', [
+      '-U', 'catalogro',
+      '-h', 'localhost',
+      '-d', 'postgres',
+      '-c', "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'catalogro' AND pid <> pg_backend_pid();",
+    ], { cwd: PROJECT_ROOT, stdio: 'inherit', timeout: 10_000, env: pgEnv });
+  } catch {
+    // Ignore — database may not exist yet on first run
+  }
+
   // Drop and recreate the database for a clean slate.
-  // Uses the same PostgreSQL user/host as DATABASE_URL in the .env file.
-  // The --if-exists flag prevents errors if the DB does not exist yet.
-  runCommand('dropdb', [
+  // PGPASSWORD is passed via environment (not command-line) for security.
+  execFileSync('dropdb', [
     '-U', 'catalogro',
     '-h', 'localhost',
     '--if-exists',
     'catalogro',
-  ]);
-  runCommand('createdb', [
+  ], { cwd: PROJECT_ROOT, stdio: 'inherit', timeout: 30_000, env: pgEnv });
+
+  execFileSync('createdb', [
     '-U', 'catalogro',
     '-h', 'localhost',
     'catalogro',
-  ]);
+  ], { cwd: PROJECT_ROOT, stdio: 'inherit', timeout: 30_000, env: pgEnv });
 
   // Run migrations to create the schema.
   runCommand('make', ['migrate']);
@@ -661,7 +694,6 @@ export const test = base.extend<AppFixtures>({
 });
 
 export { expect } from '@playwright/test';
-export { TEST_USERS, TEST_CLASSES };
 ```
 
 - [ ] **Step 2: Commit**
@@ -1312,10 +1344,10 @@ If tests fail, investigate and fix. Common issues:
 
 - [ ] **Step 3: Final commit**
 
-If any fixes were needed:
+If any fixes were needed, stage only the specific files that changed:
 
 ```bash
-git add -A
+git add web/test/e2e/ web/pages/ web/components/ web/layouts/
 git commit -m "fix(e2e): address test suite issues from full run"
 ```
 
