@@ -360,6 +360,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
   <div class="space-y-4">
     <!-- Error banner -->
     <div
+      data-testid="grade-grid-error"
       v-if="error !== null && error !== ''"
       class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
     >
@@ -367,12 +368,13 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
     </div>
 
     <!-- Loading skeleton for the grade table -->
-    <div v-if="isLoading" class="space-y-3">
+    <div data-testid="grade-grid-loading" v-if="isLoading" class="space-y-3">
       <div v-for="n in 5" :key="n" class="h-12 animate-pulse rounded-lg bg-gray-200" />
     </div>
 
     <!-- Empty state: no students in this class -->
     <div
+      data-testid="grade-grid-empty"
       v-else-if="sortedStudents.length === 0"
       class="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center"
     >
@@ -385,7 +387,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
     <!-- Responsive: horizontally scrollable on small screens.              -->
     <!-- ================================================================== -->
     <div v-else class="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-      <table class="min-w-full divide-y divide-gray-200">
+      <table data-testid="grade-grid" class="min-w-full divide-y divide-gray-200">
         <!-- Table header -->
         <thead class="bg-gray-50">
           <tr>
@@ -431,6 +433,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
         <!-- Table body: one row per student -->
         <tbody class="divide-y divide-gray-100">
           <tr
+            data-testid="student-row"
             v-for="(student, index) in sortedStudents"
             :key="student.studentId"
             class="transition-colors hover:bg-gray-50"
@@ -441,7 +444,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             </td>
 
             <!-- Student name -->
-            <td class="whitespace-nowrap px-4 py-3">
+            <td data-testid="student-name" class="whitespace-nowrap px-4 py-3">
               <span class="text-sm font-medium text-gray-900">
                 {{ student.lastName }}
               </span>
@@ -457,6 +460,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 <div v-for="grade in student.grades" :key="grade.id" class="group relative">
                   <!-- Grade badge button: click to edit this grade -->
                   <button
+                    data-testid="grade-badge"
                     type="button"
                     :title="gradeTooltip(grade)"
                     :disabled="deletingGradeId === grade.id"
@@ -475,6 +479,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
 
                   <!-- Delete button: appears on hover over the grade badge -->
                   <button
+                    data-testid="delete-grade-button"
                     type="button"
                     title="Șterge nota"
                     class="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white group-hover:flex"
@@ -506,6 +511,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             <!-- Average column (only for numeric grades) -->
             <td v-if="!usesQualifiers" class="whitespace-nowrap px-4 py-3 text-center">
               <span
+                data-testid="student-average"
                 :class="[
                   'text-sm font-semibold',
                   student.average !== null && student.average < 5
@@ -522,6 +528,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             <!-- Add grade button -->
             <td class="whitespace-nowrap px-3 py-3 text-center">
               <button
+                data-testid="add-grade-button"
                 type="button"
                 title="Adaugă notă"
                 class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-600 transition-colors hover:bg-blue-100"

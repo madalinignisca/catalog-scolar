@@ -184,7 +184,7 @@ function selectSemester(semester: Semester): void {
   <!-- LOADING STATE                                                      -->
   <!-- Shown while the class and subject data is being fetched.           -->
   <!-- ================================================================== -->
-  <div v-if="isLoading" class="space-y-4">
+  <div data-testid="catalog-loading" v-if="isLoading" class="space-y-4">
     <div class="h-8 w-48 animate-pulse rounded bg-gray-200" />
     <div class="h-6 w-32 animate-pulse rounded bg-gray-200" />
     <div class="flex gap-2">
@@ -198,7 +198,7 @@ function selectSemester(semester: Semester): void {
   <!-- Shown if the class data failed to load.                            -->
   <!-- ================================================================== -->
   <div v-else-if="loadError !== null" class="space-y-4">
-    <div class="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+    <div data-testid="catalog-error" class="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
       <p class="text-sm text-red-700">{{ loadError }}</p>
       <NuxtLink
         to="/"
@@ -219,6 +219,7 @@ function selectSemester(semester: Semester): void {
       <div>
         <!-- Back to dashboard link -->
         <NuxtLink
+          data-testid="back-link"
           to="/"
           class="mb-1 inline-flex items-center text-sm text-gray-500 hover:text-gray-700"
         >
@@ -235,17 +236,18 @@ function selectSemester(semester: Semester): void {
         </NuxtLink>
 
         <!-- Class name and education level badge -->
-        <h1 class="text-2xl font-bold text-gray-900">Clasa {{ currentClass.name }}</h1>
+        <h1 data-testid="class-title" class="text-2xl font-bold text-gray-900">Clasa {{ currentClass.name }}</h1>
         <p class="mt-0.5 text-sm text-gray-500">
-          {{ educationLevelLabels[currentClass.educationLevel] ?? currentClass.educationLevel }}
+          <span data-testid="education-level-badge">{{ educationLevelLabels[currentClass.educationLevel] ?? currentClass.educationLevel }}</span>
           &middot;
-          {{ currentClass.studentCount }} {{ currentClass.studentCount === 1 ? 'elev' : 'elevi' }}
+          <span data-testid="catalog-student-count">{{ currentClass.studentCount }} {{ currentClass.studentCount === 1 ? 'elev' : 'elevi' }}</span>
         </p>
       </div>
 
       <!-- Semester selector: two toggle buttons for Semester I and II -->
       <div class="flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
         <button
+          data-testid="semester-I"
           type="button"
           :class="[
             'rounded-md px-4 py-2 text-sm font-medium transition-colors',
@@ -258,6 +260,7 @@ function selectSemester(semester: Semester): void {
           Semestrul I
         </button>
         <button
+          data-testid="semester-II"
           type="button"
           :class="[
             'rounded-md px-4 py-2 text-sm font-medium transition-colors',
@@ -279,6 +282,7 @@ function selectSemester(semester: Semester): void {
     <div v-if="subjects.length > 0" class="border-b border-gray-200">
       <nav class="-mb-px flex space-x-1 overflow-x-auto" role="tablist">
         <button
+          data-testid="subject-tab"
           v-for="subject in subjects"
           :key="subject.id"
           type="button"
@@ -316,7 +320,7 @@ function selectSemester(semester: Semester): void {
     <!-- The main grade table component, shown for the active subject.  -->
     <!-- It watches classId, subjectId, and semester and auto-refetches -->
     <!-- when any of them change.                                       -->
-    <div v-if="activeSubjectId !== null">
+    <div data-testid="grade-grid-container" v-if="activeSubjectId !== null">
       <!-- Subject header: name and thesis indicator -->
       <div v-if="activeSubject !== null" class="mb-2 flex items-center gap-2">
         <h2 class="text-lg font-semibold text-gray-800">

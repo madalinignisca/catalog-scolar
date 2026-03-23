@@ -103,7 +103,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <!-- LOADING STATE: shown while fetchProfile is in progress             -->
   <!-- ================================================================== -->
-  <div v-if="pageLoading" class="flex items-center justify-center py-20">
+  <div data-testid="dashboard-loading" v-if="pageLoading" class="flex items-center justify-center py-20">
     <div class="text-center">
       <div
         class="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"
@@ -116,7 +116,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- TEACHER DASHBOARD                                                  -->
   <!-- Shows a grid of class cards when the user is a teacher.            -->
   <!-- ================================================================== -->
-  <div v-else-if="user?.role === 'teacher'" class="space-y-6">
+  <div data-testid="dashboard-content" v-else-if="user?.role === 'teacher'" class="space-y-6">
     <!-- Page heading -->
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Tablou de bord</h1>
@@ -125,6 +125,7 @@ function openClass(classItem: TeacherClass): void {
 
     <!-- Error banner: shown if the class list failed to load -->
     <div
+      data-testid="dashboard-error"
       v-if="error !== null && error !== ''"
       class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
     >
@@ -171,6 +172,7 @@ function openClass(classItem: TeacherClass): void {
     <!-- Class cards grid: one card per assigned class -->
     <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <button
+        data-testid="class-card"
         v-for="classItem in classes"
         :key="classItem.id"
         type="button"
@@ -179,7 +181,7 @@ function openClass(classItem: TeacherClass): void {
       >
         <!-- Class name and education level badge -->
         <div class="flex items-start justify-between">
-          <h3 class="text-lg font-semibold text-gray-900 group-hover:text-blue-700">
+          <h3 data-testid="class-card-name" class="text-lg font-semibold text-gray-900 group-hover:text-blue-700">
             Clasa {{ classItem.name }}
           </h3>
           <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
@@ -189,7 +191,7 @@ function openClass(classItem: TeacherClass): void {
 
         <!-- Student count -->
         <p class="mt-2 text-sm text-gray-500">
-          <span class="font-medium text-gray-700">{{ classItem.studentCount }}</span>
+          <span data-testid="class-card-student-count" class="font-medium text-gray-700">{{ classItem.studentCount }}</span>
           {{ classItem.studentCount === 1 ? 'elev' : 'elevi' }}
         </p>
 
@@ -239,6 +241,7 @@ function openClass(classItem: TeacherClass): void {
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <!-- Users management card -->
       <NuxtLink
+        data-testid="admin-card"
         to="/admin/users"
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
       >
@@ -248,6 +251,7 @@ function openClass(classItem: TeacherClass): void {
 
       <!-- Classes management card -->
       <NuxtLink
+        data-testid="admin-card"
         to="/admin/classes"
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
       >
@@ -257,6 +261,7 @@ function openClass(classItem: TeacherClass): void {
 
       <!-- Reports card -->
       <NuxtLink
+        data-testid="admin-card"
         to="/reports"
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
       >
@@ -280,7 +285,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <!-- FALLBACK: unknown or unhandled role                                -->
   <!-- ================================================================== -->
-  <div v-else class="py-12 text-center text-gray-500">
+  <div data-testid="welcome-message" v-else class="py-12 text-center text-gray-500">
     <p>Bine ați venit în CatalogRO</p>
   </div>
 </template>

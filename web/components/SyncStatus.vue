@@ -4,6 +4,7 @@ const { isOnline, pendingMutations } = useOfflineSync();
 
 <template>
   <div
+    data-testid="sync-status"
     :class="[
       'flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition-colors',
       isOnline
@@ -15,6 +16,7 @@ const { isOnline, pendingMutations } = useOfflineSync();
   >
     <!-- Status dot -->
     <span
+      data-testid="sync-status-dot"
       :class="[
         'h-2 w-2 rounded-full',
         isOnline
@@ -26,8 +28,8 @@ const { isOnline, pendingMutations } = useOfflineSync();
     />
 
     <!-- Label -->
-    <span v-if="!isOnline">Offline</span>
-    <span v-else-if="pendingMutations > 0">Sincronizare ({{ pendingMutations }})</span>
-    <span v-else>Sincronizat</span>
+    <span data-testid="sync-status-label" v-if="!isOnline">Offline</span>
+    <span data-testid="sync-status-label" v-else-if="pendingMutations > 0">Sincronizare ({{ pendingMutations }})</span>
+    <span data-testid="sync-status-label" v-else>Sincronizat</span>
   </div>
 </template>
