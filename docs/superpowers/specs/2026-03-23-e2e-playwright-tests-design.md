@@ -20,14 +20,19 @@ Build a comprehensive E2E test suite (~73 tests) that:
 
 Admin, secretary, and teacher roles require 2FA (TOTP). Tests generate valid TOTP codes at runtime using the `otpauth` npm library with known secrets seeded in the database.
 
+**TOTP storage model:** The API stores TOTP secrets as raw base32 strings cast to BYTEA (no encryption layer). The `totp.Validate()` call in `auth/totp.go` casts `user.TotpSecret` directly to a string and uses it as the base32 secret. No AES-GCM or encryption key is involved.
+
 **Seed data changes required:**
 - Add `totp_secret` and `totp_enabled = true` for admin, secretary, and all teachers in `seed.sql`
-- Use a known base32-encoded secret (e.g., `JBSWY3DPEHPK3PXP`) that tests can reference
-- The API's TOTP encryption must be compatible — if secrets are encrypted at rest, seed must store the encrypted form
+- Use a known base32-encoded secret: `JBSWY3DPEHPK3PXP`
+- Store as: `totp_secret = 'JBSWY3DPEHPK3PXP'::bytea, totp_enabled = true`
+
+**TOTP window race mitigation:** TOTP codes are valid for 30 seconds, but the Go `pquerna/otp` library accepts +/- 1 time step (90-second effective window). To further reduce flakiness, the TOTP helper should check the remaining time in the current window. If fewer than 5 seconds remain, wait for the next window before generating the code.
 
 ### 2.2 Data Strategy: Fresh database per test run
 
-- Playwright `globalSetup` runs `make migrate` and `make seed` before the suite starts
+- Playwright `globalSetup` resets the database to a known state before the suite starts
+- **Reset mechanism:** globalSetup drops and recreates the `catalogro` database, then runs migrations and seed. Sequence: `dropdb catalogro --if-exists && createdb catalogro && make migrate && make seed`. This ensures idempotency — running the suite twice produces identical state.
 - Tests can freely create/modify data (grades, absences) without cleanup
 - No per-test teardown needed — the DB is disposable
 - Sequential test execution (workers: 1) prevents race conditions
@@ -44,7 +49,8 @@ The current `auth.fixture.ts` uses placeholder emails (`admin@scoala-test.ro`, e
 |-----------|--------------------------------------|--------------|--------|----------------------------------------|
 | admin     | `director@scoala-rebreanu.ro`        | `catalog2026`| Yes    | `b1000000-0000-0000-0000-000000000001` |
 | secretary | `secretar@scoala-rebreanu.ro`        | `catalog2026`| Yes    | `b1000000-0000-0000-0000-000000000002` |
-| teacher   | `ana.dumitrescu@scoala-rebreanu.ro`  | `catalog2026`| Yes    | `b1000000-0000-0000-0000-000000000010` |
+| teacher (primary) | `ana.dumitrescu@scoala-rebreanu.ro`  | `catalog2026`| Yes    | `b1000000-0000-0000-0000-000000000010` |
+| teacher (middle)  | `ion.vasilescu@scoala-rebreanu.ro`   | `catalog2026`| Yes    | `b1000000-0000-0000-0000-000000000011` |
 | parent    | `ion.moldovan@gmail.com`             | `catalog2026`| No     | `b1000000-0000-0000-0000-000000000301` |
 | student   | `andrei.moldovan@elev.rebreanu.ro`   | `catalog2026`| No     | `b1000000-0000-0000-0000-000000000101` |
 
@@ -104,11 +110,11 @@ web/test/e2e/
 
 Runs before any test. Responsibilities:
 
-1. Reset database: run `make migrate` then `make seed` from the project root
+1. Reset database: `dropdb catalogro --if-exists`, `createdb catalogro`, then `make migrate`, then `make seed` — all from the project root. This ensures idempotency across repeated runs.
 2. Wait for API health: poll `GET http://localhost:8080/api/v1/health` with 30s timeout
 3. Wait for Nuxt dev server: poll `http://localhost:3000` with 60s timeout
 
-Uses Node.js `child_process.execFileSync` (not `exec`) to avoid shell injection. Commands are split into binary + args arrays.
+Uses Node.js `child_process.execFileSync` (not `exec`) to avoid shell injection. Commands are split into binary + args arrays. The `dropdb`/`createdb` commands use the same connection parameters as `DATABASE_URL` from the `.env` file.
 
 ### 3.3 TOTP Helper (`helpers/totp.ts`)
 
@@ -128,7 +134,11 @@ Each role fixture performs a real login:
 5. Wait for redirect to dashboard (`/`)
 6. Hand the authenticated `Page` to the test
 
-Exports: `adminPage`, `secretaryPage`, `teacherPage`, `parentPage`, `studentPage`
+**Breaking rename:** The existing fixture exports `authenticatedPage` (generic student). This is renamed to `studentPage` for clarity. `secretaryPage` is new. Any existing test importing `authenticatedPage` must be updated.
+
+Exports: `adminPage`, `secretaryPage`, `teacherPage`, `teacherMiddlePage`, `parentPage`, `studentPage`
+
+**Two teacher fixtures:** `teacherPage` logs in as Ana Dumitrescu (primary, class 2A). `teacherMiddlePage` logs in as Ion Vasilescu (middle, class 6B). This is necessary because Ana only teaches primary subjects — she has no middle school class assignments. Tests for numeric grades (47, 52, 56) use `teacherMiddlePage`.
 
 ### 3.5 Playwright Config Changes
 
@@ -176,9 +186,11 @@ Each page object encapsulates locators (via `data-testid`) and common actions:
 | 12 | Expired refresh token -> redirects to login | Clear refresh token |
 | 13 | Direct navigation to `/` without token -> redirects to `/login` | Fresh page, no auth |
 
-### 4.3 Account Activation (~4 tests)
+### 4.3 Account Activation (~4 tests) — DEFERRED
 
 **File: `auth/activation.spec.ts`**
+
+**Status:** These tests are deferred (`test.skip`) until the activation API endpoints are implemented. Currently `GET /auth/activate/{token}` and `POST /auth/activate` return `notImplemented` (501). The test file will be created with `test.skip` blocks so the structure is ready.
 
 | # | Test | Notes |
 |---|------|-------|
@@ -278,7 +290,7 @@ Each page object encapsulates locators (via `data-testid`) and common actions:
 | 44 | Students sorted alphabetically by last name | teacherPage |
 | 45 | Rows show: number, name, grade badges, average, add button | teacherPage |
 | 46 | Primary class: qualifier badges (FB/B/S/I) with correct colors | teacherPage |
-| 47 | Middle class: numeric badges with correct color ranges | teacherPage |
+| 47 | Middle class: numeric badges with correct color ranges | teacherMiddlePage |
 | 48 | Hovering grade shows tooltip (date + description) | teacherPage |
 | 49 | Thesis grades display "T" prefix + purple ring | teacherPage |
 | 50 | Loading state shows skeleton animation | teacherPage |
@@ -290,11 +302,11 @@ Each page object encapsulates locators (via `data-testid`) and common actions:
 | # | Test | Fixture |
 |---|------|---------|
 | 51 | Add qualifier grade (primary): click add -> modal -> select FB -> save -> appears | teacherPage |
-| 52 | Add numeric grade (middle): click add -> modal -> enter 8 -> save -> appears | teacherPage |
+| 52 | Add numeric grade (middle): click add -> modal -> enter 8 -> save -> appears | teacherMiddlePage |
 | 53 | Edit grade: click badge -> modal pre-filled -> change -> save -> updates | teacherPage |
 | 54 | Delete grade: hover -> delete -> confirm -> removed | teacherPage |
 | 55 | Validation: numeric 1-10, date required, qualifier required for primary | teacherPage |
-| 56 | Average recalculates after grade CRUD (middle/high only) | teacherPage |
+| 56 | Average recalculates after grade CRUD (middle/high only) | teacherMiddlePage |
 
 ### 4.14 Grade Edge Cases (~3 tests)
 
@@ -347,7 +359,7 @@ Each page object encapsulates locators (via `data-testid`) and common actions:
 
 | # | Test | Fixture |
 |---|------|---------|
-| 71 | Teacher with no assigned classes -> empty dashboard | Custom fixture |
+| 71 | Teacher with no assigned classes -> empty dashboard | unassignedTeacherPage |
 | 72 | Class with no grades -> empty grid with student names only | teacherPage |
 | 73 | Semester II with no data -> empty grid, not error | teacherPage |
 
@@ -355,21 +367,69 @@ Each page object encapsulates locators (via `data-testid`) and common actions:
 
 ### 5.1 TOTP secrets for MFA-enabled roles
 
-All admin, secretary, and teacher users need `totp_enabled = true` and a known `totp_secret`. The secret must be encrypted the same way the API stores it. If the API uses AES-GCM with `TOTP_ENCRYPTION_KEY`, the seed must store the ciphertext produced by that key.
+The API stores TOTP secrets as raw base32 in a BYTEA column (no encryption). Add the following UPDATE block to the end of `seed.sql`:
 
-**Alternative:** If encrypting in SQL is impractical, add a Go-based seed helper that calls the same encryption function and inserts the result.
+```sql
+-- E2E test TOTP secrets (raw base32, no encryption)
+-- All MFA-enabled roles use the same known secret for test simplicity
+UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP'::bytea, totp_enabled = true
+WHERE id IN (
+    'b1000000-0000-0000-0000-000000000001',  -- admin (director)
+    'b1000000-0000-0000-0000-000000000002',  -- secretary
+    'b1000000-0000-0000-0000-000000000010',  -- teacher Ana (primary)
+    'b1000000-0000-0000-0000-000000000011',  -- teacher Ion (middle)
+    'b1000000-0000-0000-0000-000000000012'   -- teacher Gabriela (middle)
+);
+```
 
 ### 5.2 Password hash for 2 students
 
-Add `password_hash` (bcrypt of `catalog2026`) for:
-- `andrei.moldovan@elev.rebreanu.ro` (Class 2A, primary)
-- `alexandru.pop@elev.rebreanu.ro` (Class 6B, middle)
+Modify the existing student INSERT at line 115 of `seed.sql` to include `password_hash` for 2 students:
+
+```sql
+-- Add password_hash to the INSERT for these two students:
+-- Andrei Moldovan (2A, primary): b1000000-...0101
+-- Alexandru Pop (6B, middle):    b1000000-...0201
+-- password: "catalog2026" (same bcrypt hash as other users)
+UPDATE users SET password_hash = '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW'
+WHERE id IN (
+    'b1000000-0000-0000-0000-000000000101',
+    'b1000000-0000-0000-0000-000000000201'
+);
+```
 
 ### 5.3 Activation token for 1 unactivated student
 
-Add `activation_token = 'test-activation-token-radu'` for `radu.campean@elev.rebreanu.ro`, and ensure `activated_at IS NULL` and `password_hash IS NULL`.
+```sql
+-- Radu Campean: revert activation, add token for activation flow tests
+UPDATE users
+SET activated_at = NULL,
+    password_hash = NULL,
+    activation_token = 'test-activation-token-radu',
+    activation_sent_at = now()
+WHERE id = 'b1000000-0000-0000-0000-000000000205';
+```
 
-### 5.4 data-testid attributes on pages
+### 5.4 Unassigned teacher for empty-state test (test 71)
+
+Add a teacher with no class assignments to test the empty dashboard:
+
+```sql
+-- Teacher with no class assignments (for empty-state E2E test)
+INSERT INTO users (id, school_id, role, email, first_name, last_name, password_hash, totp_secret, totp_enabled, activated_at, provisioned_by) VALUES
+    ('b1000000-0000-0000-0000-000000000013',
+     'a0000000-0000-0000-0000-000000000001',
+     'teacher', 'dan.pavel@scoala-rebreanu.ro',
+     'Dan', 'Pavel',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
+     'JBSWY3DPEHPK3PXP'::bytea, true,
+     now(), 'b1000000-0000-0000-0000-000000000002');
+-- No rows in class_subject_teachers for this user
+```
+
+The `unassignedTeacherPage` fixture logs in as `dan.pavel@scoala-rebreanu.ro`.
+
+### 5.5 data-testid attributes on pages
 
 Some pages may need additional `data-testid` attributes for reliable selectors. The login page already has them. Other pages will need them added during implementation:
 - Dashboard: class cards, admin cards, welcome message
@@ -379,13 +439,28 @@ Some pages may need additional `data-testid` attributes for reliable selectors. 
 - Activation: all form steps
 - SyncStatus: status indicator
 
+### 5.6 Test Data Reference
+
+Quick reference mapping test groups to seed entity IDs:
+
+| Entity | ID | Used by tests |
+|--------|----|---------------|
+| Class 2A (primary) | `f1000000-...-000000000001` | 38-43, 46, 51 (qualifier grade tests) |
+| Class 6B (middle) | `f1000000-...-000000000002` | 47, 52, 56 (numeric grade tests) |
+| Subject CLR (primary) | `f1000000-...-000000000001` | 46, 51 (shares UUID with class 2A — different tables, no collision) |
+| Subject ROM (middle) | `f1000000-...-000000000003` | 47, 52 |
+| Student Andrei Moldovan | `b1000000-...-000000000101` | 28-29, student fixture |
+| Student Alexandru Pop | `b1000000-...-000000000201` | middle school grade tests |
+| Student Radu Campean | `b1000000-...-000000000205` | 14-17 activation tests |
+
+**Note:** Class 2A and subject CLR share the UUID `f1000000-0000-0000-0000-000000000001`. This is safe (different tables) but worth noting to avoid confusion when hardcoding IDs in tests.
+
 ## 6. Dependencies and Prerequisites
 
 - **Backend running:** `make dev` must be running (API + DB + Redis + Nuxt)
-- **Seed data loaded:** `make seed` with updated seed.sql
-- **TOTP encryption key:** `TOTP_ENCRYPTION_KEY` env var must match between API and seed data
+- **Seed data loaded:** globalSetup handles DB reset + `make seed` automatically
 - **`otpauth` npm package:** Added as devDependency for TOTP code generation
-- **Activation endpoint:** `GET /api/v1/auth/activate/{token}` and `POST /api/v1/auth/activate` must be implemented (or activation tests skipped initially)
+- **Activation endpoints (deferred):** `GET /api/v1/auth/activate/{token}` and `POST /api/v1/auth/activate` are not yet implemented. Tests 14-17 are `test.skip` until these endpoints are built. Active test count: 69 (73 total, 4 deferred).
 
 ## 7. Test Execution
 
@@ -406,21 +481,29 @@ npx playwright test --ui
 
 ## 8. Success Criteria
 
-- All 73 tests pass against a fresh `make seed` database
+- All 69 active tests pass against a fresh database (4 activation tests deferred as `test.skip`)
 - Every user role (admin, secretary, teacher, parent, student) has at least one login + dashboard test
 - Grade CRUD tested for both primary (qualifiers) and middle (numeric) education levels
 - Offline sync cycle tested: online -> offline -> mutate -> reconnect -> verify
 - No test depends on another test's side effects (except within a single spec file)
-- Tests run in under 5 minutes locally (sequential, single worker)
+- Tests run in under 10 minutes locally (sequential, single worker). Target 8 minutes. Each login fixture performs a real auth flow including page navigation and potential MFA, so 5 minutes is unrealistic for 69+ sequential tests.
+- **Future optimization:** Use Playwright `storageState` to persist auth sessions per role and skip redundant login flows. This is not required for the initial implementation but can reduce execution time significantly.
 
 ## 9. Test Count Summary
 
-| Category | Tests |
-|----------|-------|
-| Auth and Login | 20 |
-| Dashboard and Navigation | 17 |
-| Catalog and Grading | 23 |
-| Offline Sync | 6 |
-| Error States | 4 |
-| Edge Cases | 3 |
-| **Total** | **73** |
+| Category | Tests | Notes |
+|----------|-------|-------|
+| Auth: Login (4.1) | 10 | |
+| Auth: Token (4.2) | 3 | |
+| Auth: Activation (4.3) | 4 | DEFERRED (test.skip) |
+| Auth: Access Control (4.4) | 3 | |
+| Dashboard (4.5-4.8) | 9 | 3 teacher + 2 admin + 2 parent + 2 student |
+| Navigation (4.9-4.10) | 8 | 4 sidebar + 4 responsive |
+| Catalog: Navigation (4.11) | 6 | |
+| Catalog: Grade Display (4.12) | 7 | |
+| Catalog: Grade CRUD (4.13) | 6 | |
+| Catalog: Edge Cases (4.14) | 3 | |
+| Offline Sync (4.15) | 6 | 5 offline-mode + 1 conflict |
+| Error States (4.16) | 5 | 3 api-errors + 2 session |
+| Edge Cases (4.17) | 3 | |
+| **Total** | **73** | **69 active, 4 deferred** |
