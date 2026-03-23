@@ -44,12 +44,13 @@
 import { test, expect } from '@playwright/test';
 
 // ── Internal: project-relative helpers and page objects ───────────────────────
-// `authTest` is aliased to avoid a name collision with the plain `test` above.
-// `parentPage` from this fixture is already on the dashboard when the test begins.
 // `generateTOTP` creates a valid 6-digit code from the seeded TOTP secret and
 // automatically waits if we are close to a 30-second TOTP window boundary.
 // `LoginPage` encapsulates all /login form interactions so tests read like prose.
-import { test as authTest, TEST_USERS } from '../fixtures/auth.fixture';
+// `TEST_USERS` contains seed credentials for all roles.
+// NOTE: The logout test (test 10) lives in auth/logout.spec.ts to avoid mixing
+// two different `test` objects in the same file (Playwright anti-pattern).
+import { TEST_USERS } from '../fixtures/auth.fixture';
 import { generateTOTP } from '../helpers/totp';
 import { LoginPage } from '../page-objects/login.page';
 
@@ -306,46 +307,5 @@ test.describe('login page', () => {
     expect(loginPage.isOnDashboard()).toBe(true);
   });
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TEST 10: Logout clears the session and redirects to /login
-//
-// WHY THIS IS OUTSIDE THE DESCRIBE BLOCK (technically it is inside — see below)
-// NOTE: This test uses `authTest` (the custom fixture) instead of `test`.
-// `authTest.describe` is functionally identical to `test.describe` but it
-// carries the extended fixture definitions (adminPage, parentPage, etc.).
-//
-// We use `parentPage` because parents have no MFA and their login is the
-// fastest way to get an authenticated session as a setup step.
-//
-// PURPOSE: After a successful login, clicking the logout button must:
-//   1. Call the logout API endpoint (or clear the local session state)
-//   2. Redirect the browser back to /login
-//   3. Leave the user unable to access protected routes
-// ─────────────────────────────────────────────────────────────────────────────
-authTest.describe('login page — authenticated actions', () => {
-  authTest('logout clears session and redirects to login', async ({ parentPage }) => {
-    // `parentPage` is a Playwright Page that auth.fixture.ts has already logged
-    // in as Ion Moldovan (parent). The fixture called performLogin() before this
-    // test function ran, so we start on the dashboard at '/'.
-
-    // The logout button lives in the global app layout (not on the login page),
-    // so we query it directly on the page rather than through LoginPage.
-    // data-testid="logout-button" must be present in the layout component
-    // (e.g. web/layouts/default.vue or web/components/AppHeader.vue).
-    const logoutButton = parentPage.getByTestId('logout-button');
-
-    // Click the logout button. This should:
-    //   - Invalidate the session (clear JWT cookie / Pinia auth state)
-    //   - Trigger a Nuxt navigation back to /login
-    await logoutButton.click();
-
-    // Wait for the redirect to complete. A 10-second timeout is generous but
-    // accounts for any session invalidation round-trips.
-    await parentPage.waitForURL('**/login', { timeout: 10_000 });
-
-    // Final assertion: the URL must contain "/login", confirming the user was
-    // redirected to the public login page and is no longer on a protected route.
-    expect(parentPage.url()).toContain('/login');
-  });
-});
+// NOTE: Test 10 (logout) lives in auth/logout.spec.ts to avoid mixing
+// two different `test` objects in the same file (Playwright anti-pattern).

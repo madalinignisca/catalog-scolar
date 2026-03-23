@@ -134,8 +134,9 @@ async function performLogin(
   page: Page,
   user: (typeof TEST_USERS)[keyof typeof TEST_USERS],
 ): Promise<void> {
-  // Navigate to the login page.
+  // Navigate to the login page and wait for DOM to be ready.
   await page.goto('/login');
+  await page.getByTestId('email-input').waitFor({ state: 'visible' });
 
   // Fill email and password using data-testid selectors.
   await page.getByTestId('email-input').fill(user.email);
@@ -159,7 +160,8 @@ async function performLogin(
   }
 
   // Wait for navigation to the dashboard (successful login redirect).
-  await page.waitForURL('/', { timeout: 10_000 });
+  // Use a URL pattern that matches exactly '/' but not '/login'.
+  await page.waitForURL((url) => url.pathname === '/', { timeout: 15_000 });
 }
 
 // ── Fixture type declarations ─────────────────────────────────────────────────
