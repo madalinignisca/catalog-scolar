@@ -10,11 +10,13 @@ interface User {
   totpEnabled: boolean;
 }
 
+// NOTE: The api() wrapper auto-converts snake_case API keys to camelCase,
+// so these field names match the CONVERTED output (not the raw API response).
 interface LoginResponse {
-  access_token: string;
-  refresh_token: string;
-  mfa_required?: boolean;
-  mfa_token?: string;
+  accessToken: string;
+  refreshToken: string;
+  mfaRequired?: boolean;
+  mfaToken?: string;
 }
 
 const user = ref<User | null>(null);
@@ -34,11 +36,11 @@ export function useAuth() {
         skipAuth: true,
       });
 
-      if (data.mfa_required === true && data.mfa_token !== undefined && data.mfa_token !== '') {
-        return { mfaRequired: true, mfaToken: data.mfa_token };
+      if (data.mfaRequired === true && data.mfaToken !== undefined && data.mfaToken !== '') {
+        return { mfaRequired: true, mfaToken: data.mfaToken };
       }
 
-      setTokens(data.access_token, data.refresh_token);
+      setTokens(data.accessToken, data.refreshToken);
       await fetchProfile();
       return { mfaRequired: false };
     } finally {
@@ -53,7 +55,7 @@ export function useAuth() {
       skipAuth: true,
     });
 
-    setTokens(data.access_token, data.refresh_token);
+    setTokens(data.accessToken, data.refreshToken);
     await fetchProfile();
   }
 
