@@ -39,6 +39,13 @@ export default defineConfig({
   testDir: 'test/e2e',
 
   /**
+   * globalSetup: runs once before any test.
+   * Resets the database (drop + create + migrate + seed) and waits for
+   * API + Nuxt servers to be healthy. See test/e2e/global-setup.ts.
+   */
+  globalSetup: './test/e2e/global-setup.ts',
+
+  /**
    * outputDir: where Playwright writes test artifacts (screenshots, traces, videos).
    * This folder is .gitignored so it never ends up in version control.
    */
