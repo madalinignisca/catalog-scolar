@@ -168,7 +168,7 @@ async function globalSetup(): Promise<void> {
 
   // Step 6: Wait for the Go API to respond to health checks.
   // The health endpoint returns 200 OK when the server and DB are both ready.
-  await waitForURL('http://localhost:8080/api/v1/health', HEALTH_CHECK_TIMEOUT_MS);
+  await waitForURL('http://localhost:8080/healthz', HEALTH_CHECK_TIMEOUT_MS);
   console.log('[global-setup] API server is ready.');
 
   // Step 7: Wait for the Nuxt SSR dev server to be reachable.
