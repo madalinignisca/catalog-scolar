@@ -111,10 +111,41 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   // so callers get the inner payload directly (e.g., api<User>('/users/me')
   // returns the User object, not { data: User }).
   const body: unknown = await response.json();
+  let payload: unknown;
   if (typeof body === 'object' && body !== null && 'data' in body) {
-    return (body as Record<string, unknown>)['data'] as T;
+    payload = (body as Record<string, unknown>)['data'];
+  } else {
+    payload = body;
   }
-  return body as T;
+
+  // Convert snake_case keys from the Go API to camelCase used by TypeScript
+  // interfaces throughout the frontend. This is done recursively so nested
+  // objects (e.g., homeroom_teacher inside a class) are also converted.
+  return snakeToCamel(payload) as T;
+}
+
+/**
+ * Recursively converts snake_case object keys to camelCase.
+ * Handles arrays, nested objects, and primitive values.
+ *
+ * Examples:
+ *   { first_name: "Ana" }         → { firstName: "Ana" }
+ *   { school_id: "abc" }          → { schoolId: "abc" }
+ *   [{ grade_date: "2026-01-01" }] → [{ gradeDate: "2026-01-01" }]
+ */
+function snakeToCamel(data: unknown): unknown {
+  if (Array.isArray(data)) {
+    return data.map(snakeToCamel);
+  }
+  if (data !== null && typeof data === 'object' && !(data instanceof Date)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+      result[camelKey] = snakeToCamel(value);
+    }
+    return result;
+  }
+  return data;
 }
 
 async function tryRefreshToken(): Promise<boolean> {

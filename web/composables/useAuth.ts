@@ -70,7 +70,8 @@ export function useAuth() {
     const token = getAccessToken();
     if (token === null || token === '') return;
     try {
-      // api() auto-unwraps the { data: ... } envelope, so we get User directly
+      // api() auto-unwraps the { data: ... } envelope AND converts snake_case
+      // keys to camelCase, so we get a User-shaped object directly.
       user.value = await api<User>('/users/me');
     } catch {
       user.value = null;
