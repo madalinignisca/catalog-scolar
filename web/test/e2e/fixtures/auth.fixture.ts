@@ -152,8 +152,10 @@ async function performLogin(
     const code = await generateTOTP(TEST_TOTP_SECRET);
 
     // Fill and submit the MFA form.
+    // The MFA form has its own submit button with testid 'mfa-submit-button'
+    // (different from the login form's 'submit-button').
     await page.getByTestId('mfa-input').fill(code);
-    await page.getByTestId('submit-button').click();
+    await page.getByTestId('mfa-submit-button').click();
   }
 
   // Wait for navigation to the dashboard (successful login redirect).

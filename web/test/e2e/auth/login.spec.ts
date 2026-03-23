@@ -204,8 +204,10 @@ test.describe('login page', () => {
     const code = await generateTOTP();
 
     // Step 4: Fill the TOTP code and submit the MFA form.
+    // The MFA form has its own submit button ('mfa-submit-button'), separate
+    // from the login form's 'submit-button'.
     await loginPage.fillMfaCode(code);
-    await loginPage.submit();
+    await loginPage.submitMfa();
 
     // Step 5: The API validates the code and issues a session. Nuxt navigates to '/'.
     await page.waitForURL('/', { timeout: 10_000 });
@@ -236,7 +238,7 @@ test.describe('login page', () => {
     // (the odds of it matching are 1-in-a-million, and OTP libs reject it if
     // the counter doesn't align).
     await loginPage.fillMfaCode('000000');
-    await loginPage.submit();
+    await loginPage.submitMfa();
 
     // The mfa-error element is in the TOTP section (v-else block in login.vue).
     // It uses a separate testid from login-error to avoid ambiguity.
@@ -267,7 +269,7 @@ test.describe('login page', () => {
     // Step 3: Generate and submit a valid TOTP code.
     const code = await generateTOTP();
     await loginPage.fillMfaCode(code);
-    await loginPage.submit();
+    await loginPage.submitMfa();
 
     // Step 4: Assert the admin landed on the dashboard.
     await page.waitForURL('/', { timeout: 10_000 });
@@ -297,7 +299,7 @@ test.describe('login page', () => {
     // Step 3: Generate and submit a valid TOTP code.
     const code = await generateTOTP();
     await loginPage.fillMfaCode(code);
-    await loginPage.submit();
+    await loginPage.submitMfa();
 
     // Step 4: Assert the secretary landed on the dashboard.
     await page.waitForURL('/', { timeout: 10_000 });
