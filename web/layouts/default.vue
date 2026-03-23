@@ -250,7 +250,7 @@ const roleLabels: Record<string, string> = {
         <!-- Right side of top bar: sync status, user name, logout -->
         <div class="flex items-center gap-4">
           <!-- Sync status indicator (shows online/offline/syncing state) -->
-          <SyncSyncStatus />
+          <SyncStatus />
 
           <!-- Current user name + role badge (hidden on very small screens) -->
           <div v-if="user" class="hidden items-center gap-2 sm:flex">
