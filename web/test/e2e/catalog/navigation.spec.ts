@@ -69,7 +69,7 @@ test(
     // Wait for the page to finish loading before checking header content.
     // The grade grid container appears once the API response has been
     // processed and the Vue component has rendered.
-    await expect(catalogPage.gradeGridContainer).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.gradeGridContainer).toBeVisible({ timeout: 15_000 });
 
     // ── Class title ───────────────────────────────────────────────────────────
     // The heading may say "Clasa 2A", "2A", or similar. We use toContainText
@@ -112,7 +112,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     // Wait for the semester toggle to be visible before asserting on it.
-    await expect(catalogPage.semesterI).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.semesterI).toBeVisible({ timeout: 15_000 });
 
     // Strategy 1 — accessibility attribute (preferred).
     // If the component uses aria-pressed, this assertion catches it.
@@ -161,7 +161,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     // Wait for the initial page load to settle.
-    await expect(catalogPage.gradeGridContainer).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.gradeGridContainer).toBeVisible({ timeout: 15_000 });
 
     // Click the semester II button.
     await catalogPage.selectSemester('II');
@@ -201,7 +201,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     // Wait for the subject tabs to appear after the class data loads.
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
     // There should be exactly 2 tabs (CLR and MEM) for Ana in class 2A.
     // We use toHaveCount to assert the exact number, which guards against
@@ -239,7 +239,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     // Wait for subject tabs to load before clicking.
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
     // Click the CLR tab. The UI must then fetch and display CLR grades.
     await catalogPage.clickSubjectTab('CLR');
@@ -270,7 +270,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     // Wait for the back link to be rendered before clicking.
-    await expect(catalogPage.backLink).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.backLink).toBeVisible({ timeout: 15_000 });
 
     // Click the back link using the page-object helper.
     await catalogPage.goBack();

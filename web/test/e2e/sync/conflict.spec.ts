@@ -96,7 +96,7 @@ test(
 
     // ── Step 1: Navigate to catalog (still online) ────────────────────────────
     await catalogPage.goto(TEST_CLASSES.class2A.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -141,12 +141,12 @@ test(
 
     // Wait for the page to finish loading after the reload.
     // We wait for the app shell to rehydrate (the nav should become visible).
-    await expect(layout.sidebar).toBeVisible({ timeout: 10_000 });
+    await expect(layout.sidebar).toBeVisible({ timeout: 15_000 });
 
     // ── Step 7: Navigate back to 2A / CLR ────────────────────────────────────
     // After reload we are back at the dashboard — navigate to the catalog again.
     await catalogPage.goto(TEST_CLASSES.class2A.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 

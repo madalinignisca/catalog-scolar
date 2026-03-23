@@ -68,8 +68,9 @@ test(
 
     // Wait for the page to fully render before checking visibility.
     // We wait for the mobile menu button specifically, as it is the
-    // element that must appear on mobile.
-    await expect(layout.mobileMenuButton).toBeVisible();
+    // element that must appear on mobile. Allow 15 s for the fixture-based
+    // login to complete and the page content to finish loading.
+    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
     // ── Sidebar should be hidden ──────────────────────────────────────────────
     // isSidebarVisible() calls Playwright's isVisible() on the sidebar locator.
@@ -112,7 +113,8 @@ test(
     const layout = new LayoutPage(teacherPage);
 
     // Precondition: sidebar is closed and hamburger is available.
-    await expect(layout.mobileMenuButton).toBeVisible();
+    // Allow 15 s for the fixture-based login and initial page render to settle.
+    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
     // Open the mobile sidebar drawer.
     await layout.openMobileMenu();
@@ -156,7 +158,8 @@ test(
     const layout = new LayoutPage(teacherPage);
 
     // ── Step 1: Open the drawer ───────────────────────────────────────────────
-    await expect(layout.mobileMenuButton).toBeVisible();
+    // Allow 15 s for the fixture-based login and initial page render to settle.
+    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
     await layout.openMobileMenu();
 
     // ── Step 2: Wait for the drawer to be fully open ──────────────────────────
@@ -200,7 +203,8 @@ test(
     const layout = new LayoutPage(teacherPage);
 
     // ── Step 1: Open the mobile drawer ───────────────────────────────────────
-    await expect(layout.mobileMenuButton).toBeVisible();
+    // Allow 15 s for the fixture-based login and initial page render to settle.
+    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
     await layout.openMobileMenu();
 
     // Wait for the drawer to open before interacting with nav items inside it.

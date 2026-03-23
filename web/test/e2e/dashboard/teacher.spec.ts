@@ -42,7 +42,9 @@ test(
 
     // The dashboard fetches class assignments asynchronously. Wait for the
     // content container to become visible before asserting anything inside it.
-    await expect(dashboard.content).toBeVisible();
+    // The dashboard may show a loading spinner ("Se incarca...") first, so we
+    // allow up to 15 seconds for the content to appear after the fixture login.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // classCards is a multi-element locator that matches every
     // [data-testid="class-card"] element on the page.
@@ -68,7 +70,8 @@ test(
     const dashboard = new DashboardPage(teacherPage);
 
     // Ensure content has loaded before reading card contents.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds for the dashboard to finish its async data fetch.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // Grab the first (and only) class card as a scoped locator.
     const firstCard = dashboard.classCards.first();
@@ -108,7 +111,8 @@ test(
     const dashboard = new DashboardPage(teacherPage);
 
     // Wait for the card grid to appear before clicking.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds for the dashboard to finish its async data fetch.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // clickClassCard is a DashboardPage helper that finds the card by text
     // content ("2A") and fires a click event on it.

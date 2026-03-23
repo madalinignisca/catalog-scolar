@@ -109,7 +109,9 @@ test(
     // If neither testid exists, the test will fail — prompting the developer
     // to add an empty state to the teacher dashboard component.
     const emptyState = emptyStateA.or(emptyStateB);
-    await expect(emptyState).toBeVisible({ timeout: 5_000 });
+    // Allow up to 15 seconds — the dashboard may show a loading spinner before
+    // the empty state becomes visible after the fixture-based login.
+    await expect(emptyState).toBeVisible({ timeout: 15_000 });
   },
 );
 

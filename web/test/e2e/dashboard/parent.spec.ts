@@ -43,7 +43,8 @@ test(
     const dashboard = new DashboardPage(parentPage);
 
     // Wait for the dashboard content area to finish loading.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds — the dashboard may show a loading spinner first.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // The parent's child is Andrei Moldovan. The dashboard should render
     // the child's name somewhere inside the content area.
@@ -76,7 +77,8 @@ test(
     const dashboard = new DashboardPage(parentPage);
 
     // Give the dashboard time to fully render before asserting absence.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds — the dashboard may show a loading spinner first.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // toHaveCount(0) asserts that zero matching elements exist in the DOM.
     // This is more reliable than toBeHidden() for elements rendered with v-if

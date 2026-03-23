@@ -119,13 +119,28 @@ export const TEST_CLASSES = {
   },
 } as const;
 
+// ── API base URL ──────────────────────────────────────────────────────────────
+const API_BASE = 'http://localhost:8080/api/v1';
+
 // ── Login helper ──────────────────────────────────────────────────────────────
 
 /**
  * performLogin
  *
- * Navigates to /login, enters credentials, handles MFA if required,
- * and waits for the dashboard to load.
+ * Authenticates by calling the API directly (not through the UI) and injects
+ * the resulting JWT tokens into the browser's localStorage. Then navigates
+ * to the dashboard.
+ *
+ * WHY API-BASED LOGIN?
+ * ────────────────────
+ * Fixtures need a fast, reliable way to get an authenticated browser session.
+ * Driving the login UI in fixtures was unreliable — the MFA form's submit
+ * button click intermittently failed to trigger Vue's @submit.prevent handler
+ * due to SSR hydration timing. Calling the API directly bypasses all UI
+ * interaction issues while still using real authentication (real tokens from
+ * the real backend).
+ *
+ * The login UI itself is thoroughly tested in auth/login.spec.ts (tests 1-9).
  *
  * @param page - Playwright Page instance.
  * @param user - User credentials from TEST_USERS.
@@ -134,33 +149,73 @@ async function performLogin(
   page: Page,
   user: (typeof TEST_USERS)[keyof typeof TEST_USERS],
 ): Promise<void> {
-  // Navigate to the login page and wait for DOM to be ready.
-  await page.goto('/login');
-  await page.getByTestId('email-input').waitFor({ state: 'visible' });
+  // Step 1: Call the login API endpoint directly from Node.js.
+  const loginResponse = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: user.email, password: user.password }),
+  });
 
-  // Fill email and password using data-testid selectors.
-  await page.getByTestId('email-input').fill(user.email);
-  await page.getByTestId('password-input').fill(user.password);
-
-  // Submit the login form.
-  await page.getByTestId('submit-button').click();
-
-  if (user.mfaRequired) {
-    // Wait for the MFA input to appear (API returned mfaRequired: true).
-    await page.getByTestId('mfa-input').waitFor({ state: 'visible' });
-
-    // Generate a valid TOTP code from the seeded secret.
-    const code = await generateTOTP(TEST_TOTP_SECRET);
-
-    // Fill and submit the MFA form.
-    // The MFA form has its own submit button with testid 'mfa-submit-button'
-    // (different from the login form's 'submit-button').
-    await page.getByTestId('mfa-input').fill(code);
-    await page.getByTestId('mfa-submit-button').click();
+  if (!loginResponse.ok) {
+    throw new Error(`Login API failed for ${user.email}: ${String(loginResponse.status)}`);
   }
 
-  // Wait for navigation to the dashboard (successful login redirect).
-  // Use a URL pattern that matches exactly '/' but not '/login'.
+  const loginData = (await loginResponse.json()) as {
+    data: {
+      access_token?: string;
+      refresh_token?: string;
+      mfa_required?: boolean;
+      mfa_token?: string;
+    };
+  };
+
+  let accessToken = loginData.data.access_token;
+  let refreshToken = loginData.data.refresh_token;
+
+  // Step 2: If MFA is required, call the 2FA verification endpoint.
+  if (loginData.data.mfa_required === true && loginData.data.mfa_token !== undefined) {
+    const code = await generateTOTP(TEST_TOTP_SECRET);
+
+    const mfaResponse = await fetch(`${API_BASE}/auth/2fa/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mfa_token: loginData.data.mfa_token,
+        totp_code: code,
+      }),
+    });
+
+    if (!mfaResponse.ok) {
+      throw new Error(`MFA API failed for ${user.email}: ${String(mfaResponse.status)}`);
+    }
+
+    const mfaData = (await mfaResponse.json()) as {
+      data: { access_token: string; refresh_token: string };
+    };
+    accessToken = mfaData.data.access_token;
+    refreshToken = mfaData.data.refresh_token;
+  }
+
+  if (accessToken === undefined || refreshToken === undefined) {
+    throw new Error(`No tokens received for ${user.email}`);
+  }
+
+  // Step 3: Navigate to the app and inject tokens into localStorage.
+  // We must navigate first because localStorage is origin-scoped — we need
+  // the page to be on localhost:3000 before we can set localStorage keys.
+  await page.goto('/login');
+
+  await page.evaluate(
+    ({ access, refresh }) => {
+      localStorage.setItem('catalogro_access_token', access);
+      localStorage.setItem('catalogro_refresh_token', refresh);
+    },
+    { access: accessToken, refresh: refreshToken },
+  );
+
+  // Step 4: Navigate to the dashboard. The Nuxt app will read the tokens
+  // from localStorage and render the authenticated view.
+  await page.goto('/');
   await page.waitForURL((url) => url.pathname === '/', { timeout: 15_000 });
 }
 

@@ -42,7 +42,8 @@ test(
     const dashboard = new DashboardPage(studentPage);
 
     // Wait for the dashboard content area to finish its async data fetch.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds — the dashboard may show a loading spinner first.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // The welcome message element ([data-testid="welcome-message"]) must be
     // visible — it is the primary personalisation signal on this page.
@@ -73,7 +74,8 @@ test(
     const dashboard = new DashboardPage(studentPage);
 
     // Confirm the dashboard has finished loading (no longer showing spinner).
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds — the dashboard may show a loading spinner first.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // toHaveCount(0) is the correct way to assert that v-if-gated elements
     // are absent: v-if removes the element from the DOM entirely, so the

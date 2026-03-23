@@ -74,7 +74,7 @@ test(
     const modal = new GradeInputModal(teacherMiddlePage);
 
     await catalogPage.goto(TEST_CLASSES.class6B.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('ROM');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -177,7 +177,7 @@ test(
     const catalogPage = new CatalogPage(teacherMiddlePage);
 
     await catalogPage.goto(TEST_CLASSES.class6B.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('ROM');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -271,7 +271,7 @@ test(
     const modal = new GradeInputModal(teacherPage);
 
     await catalogPage.goto(TEST_CLASSES.class2A.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 

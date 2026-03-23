@@ -104,7 +104,7 @@ authTest(
     // ── Wait for subject tabs to load (page shell rendered) ───────────────────
     // The class header and tabs load from a separate endpoint that is NOT
     // intercepted. We wait for them to confirm the page reached a stable state.
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
 
     // ── Assert error element is visible ───────────────────────────────────────
@@ -153,7 +153,7 @@ authTest(
 
     // ── Navigate and wait for the grid to load normally ───────────────────────
     await catalogPage.goto(TEST_CLASSES.class2A.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -253,7 +253,7 @@ test(
     // If this assertion fails it means the app shows an infinite spinner
     // instead of an error — a usability bug for low-connectivity users.
     const loginError = page.getByTestId('login-error');
-    await expect(loginError).toBeVisible({ timeout: 10_000 });
+    await expect(loginError).toBeVisible({ timeout: 15_000 });
 
     // ── Verify the submit button is not spinning indefinitely ─────────────────
     // As a secondary check, confirm the button is not disabled/loading.

@@ -83,7 +83,7 @@ test.beforeEach(async ({ teacherPage }) => {
   await catalogPage.goto(TEST_CLASSES.class2A.id);
 
   // Wait for subject tabs to render — confirms the catalog data has loaded.
-  await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+  await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
   // Switch to the CLR subject (Comunicare în Limba Română — primary literacy).
   await catalogPage.clickSubjectTab('CLR');

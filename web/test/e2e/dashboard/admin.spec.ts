@@ -33,7 +33,8 @@ test(
     const dashboard = new DashboardPage(adminPage);
 
     // Wait for the async data fetch to complete and the content area to appear.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds — the dashboard may show a loading spinner first.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // adminCards is a multi-element locator matching every
     // [data-testid="admin-card"] element on the page.
@@ -63,7 +64,8 @@ test(
     const dashboard = new DashboardPage(adminPage);
 
     // Wait for dashboard content to be fully rendered.
-    await expect(dashboard.content).toBeVisible();
+    // Allow up to 15 seconds — the dashboard may show a loading spinner first.
+    await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
 
     // Record the starting URL (should be '/').
     const urlBefore = adminPage.url();

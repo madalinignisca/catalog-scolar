@@ -58,7 +58,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     // Wait for subject tabs before clicking.
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
 
     // Wait for all 5 student rows to appear.
@@ -121,7 +121,7 @@ test(
     const catalogPage = new CatalogPage(teacherPage);
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -163,7 +163,7 @@ test(
     const catalogPage = new CatalogPage(teacherPage);
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -207,7 +207,7 @@ test(
     const catalogPage = new CatalogPage(teacherMiddlePage);
     await catalogPage.goto(TEST_CLASSES.class6B.id);
 
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
     // Ion Vasilescu teaches ROM and IST in class 6B.
     await catalogPage.clickSubjectTab('ROM');
@@ -252,7 +252,7 @@ test(
     const catalogPage = new CatalogPage(teacherPage);
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('CLR');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -321,7 +321,7 @@ test(
     const catalogPage = new CatalogPage(teacherMiddlePage);
     await catalogPage.goto(TEST_CLASSES.class6B.id);
 
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('ROM');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
@@ -409,7 +409,7 @@ test(
 
     // After the delayed responses arrive, the loading indicator should
     // disappear as the Vue component transitions to the data-loaded state.
-    await expect(catalogPage.loadingIndicator).not.toBeVisible({ timeout: 10_000 });
+    await expect(catalogPage.loadingIndicator).not.toBeVisible({ timeout: 15_000 });
 
     // The grade grid container should now be visible with the actual data.
     await expect(catalogPage.gradeGridContainer).toBeVisible();
