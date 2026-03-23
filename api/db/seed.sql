@@ -277,3 +277,61 @@ INSERT INTO source_mappings (school_id, entity_type, entity_id, source_system, s
 INSERT INTO source_mappings (school_id, entity_type, entity_id, source_system, source_id, source_metadata) VALUES
     ('a0000000-0000-0000-0000-000000000001', 'class', 'f1000000-0000-0000-0000-000000000001', 'siiir', 'CJ-GIM-0042:2A:2026', '{"level": "primar"}'),
     ('a0000000-0000-0000-0000-000000000001', 'class', 'f1000000-0000-0000-0000-000000000002', 'siiir', 'CJ-GIM-0042:6B:2026', '{"level": "gimnazial"}');
+
+-- ============================================================
+-- E2E TEST SUPPORT
+-- TOTP secrets, student passwords, activation tokens
+-- ============================================================
+
+-- TOTP secrets for MFA-enabled roles (raw base32, no encryption)
+-- All staff users share the same test secret: JBSWY3DPEHPK3PXP
+-- The otpauth library in E2E tests generates valid codes from this secret
+UPDATE users SET totp_secret = 'JBSWY3DPEHPK3PXP'::bytea, totp_enabled = true
+WHERE id IN (
+    'b1000000-0000-0000-0000-000000000001',  -- admin Maria Popescu
+    'b1000000-0000-0000-0000-000000000002',  -- secretary Elena Ionescu
+    'b1000000-0000-0000-0000-000000000010',  -- teacher Ana Dumitrescu (primary)
+    'b1000000-0000-0000-0000-000000000011',  -- teacher Ion Vasilescu (middle)
+    'b1000000-0000-0000-0000-000000000012',  -- teacher Gabriela Marin (middle)
+    'b2000000-0000-0000-0000-000000000001',  -- admin Adrian Neagu (School 2)
+    'b2000000-0000-0000-0000-000000000010',  -- teacher Mihai Stanescu (School 2)
+    'b2000000-0000-0000-0000-000000000011'   -- teacher Laura Georgescu (School 2)
+);
+
+-- Activate 2 students with password for E2E login tests
+-- password: "catalog2026" (same bcrypt hash as all other test users)
+UPDATE users SET password_hash = '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW'
+WHERE id IN (
+    'b1000000-0000-0000-0000-000000000101',  -- Andrei Moldovan (class 2A, primary)
+    'b1000000-0000-0000-0000-000000000201'   -- Alexandru Pop (class 6B, middle)
+);
+
+-- Radu Campean: revert to unactivated state with activation token
+-- Used by auth/activation.spec.ts (tests 14-17, currently deferred)
+UPDATE users
+SET activated_at = NULL,
+    password_hash = NULL,
+    activation_token = 'test-activation-token-radu',
+    activation_sent_at = now()
+WHERE id = 'b1000000-0000-0000-0000-000000000205';
+
+-- Teacher with zero class assignments (for empty dashboard E2E test #71)
+INSERT INTO users (id, school_id, role, email, first_name, last_name, password_hash, totp_secret, totp_enabled, activated_at, provisioned_by) VALUES
+    ('b1000000-0000-0000-0000-000000000013',
+     'a0000000-0000-0000-0000-000000000001',
+     'teacher', 'dan.pavel@scoala-rebreanu.ro',
+     'Dan', 'Pavel',
+     '$2a$10$AgrFyrZVE6ZRRSXt46/eHepzjgYkWMTxQAB7b6QU83l2NnNDrvAXW',
+     'JBSWY3DPEHPK3PXP'::bytea, true,
+     now(), 'b1000000-0000-0000-0000-000000000002');
+
+-- Thesis grade for Alexandru Pop in ROM (middle school, has_thesis=true)
+-- Used by tests 49 (thesis display) and 57 (thesis creation verification)
+INSERT INTO grades (school_id, student_id, class_id, subject_id, teacher_id, school_year_id, semester, numeric_grade, is_thesis, grade_date, description) VALUES
+    ('a0000000-0000-0000-0000-000000000001',
+     'b1000000-0000-0000-0000-000000000201',
+     'f1000000-0000-0000-0000-000000000002',
+     'f1000000-0000-0000-0000-000000000003',
+     'b1000000-0000-0000-0000-000000000011',
+     'e0000000-0000-0000-0000-000000000001',
+     'I', 7, true, '2027-01-15', 'Teză semestrială');
