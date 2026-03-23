@@ -28,11 +28,15 @@ test.describe('logout', () => {
     await loginPage.fillPassword(TEST_USERS.parent.password);
     await loginPage.submit();
 
-    // Wait for redirect to dashboard.
+    // Wait for redirect to dashboard and for the layout to render.
     await page.waitForURL('/', { timeout: 10_000 });
 
-    // Step 2: Click the logout button in the layout.
+    // Step 2: Wait for the logout button to appear in the layout.
+    // This confirms the dashboard (with default layout) has fully rendered.
     const logoutButton = page.getByTestId('logout-button');
+    await logoutButton.waitFor({ state: 'visible', timeout: 10_000 });
+
+    // Step 3: Click the logout button.
     await logoutButton.click();
 
     // Step 3: Verify redirect to /login.
