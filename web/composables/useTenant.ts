@@ -52,11 +52,9 @@ export interface School {
 
 /**
  * Shape of the API response from GET /schools/current.
- * Follows the standard CatalogRO envelope: { data: ... }
+ * api() auto-unwraps the { data: ... } envelope, so this is the inner type.
  */
-interface SchoolResponse {
-  data: School;
-}
+type SchoolResponse = School;
 
 // ── Shared reactive state ──────────────────────────────────────────────────
 // These refs live at module level so all components share the same school data.
@@ -95,7 +93,7 @@ export function useTenant() {
 
     try {
       const response = await api<SchoolResponse>('/schools/current');
-      currentSchool.value = response.data;
+      currentSchool.value = response;
     } catch (e: unknown) {
       /* If the fetch fails (e.g. network error, token expired),
        * store the error message so the UI can display a warning */

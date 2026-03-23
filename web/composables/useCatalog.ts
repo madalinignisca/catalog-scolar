@@ -153,30 +153,22 @@ export interface UpdateGradePayload {
 
 // ── API Response Types ─────────────────────────────────────────────────────
 
-/** Response envelope for GET /classes */
-interface ClassesResponse {
-  data: TeacherClass[];
-}
+/** Response type for GET /classes (api() auto-unwraps the { data: ... } envelope) */
+type ClassesResponse = TeacherClass[];
 
-/** Response envelope for class teachers (GET /classes/{classId}/teachers) */
-interface ClassTeachersResponse {
-  data: Array<{
-    teacherId: string;
-    subjects: TeacherSubject[];
-  }>;
-}
+/** Response type for class teachers (GET /classes/{classId}/teachers) */
+type ClassTeachersResponse = Array<{
+  teacherId: string;
+  subjects: TeacherSubject[];
+}>;
 
-/** Response envelope for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades) */
+/** Response type for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades) */
 interface GradesResponse {
-  data: {
-    students: StudentWithGrades[];
-  };
+  students: StudentWithGrades[];
 }
 
-/** Response envelope for single grade operations (POST/PUT) */
-interface GradeResponse {
-  data: Grade;
-}
+/** Response type for single grade operations (POST/PUT) */
+type GradeResponse = Grade;
 
 // ── Composable ─────────────────────────────────────────────────────────────
 
@@ -218,7 +210,7 @@ export function useCatalog() {
 
     try {
       const response = await api<ClassesResponse>('/classes');
-      classes.value = response.data;
+      classes.value = response;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca clasele';
       classes.value = [];
@@ -244,7 +236,7 @@ export function useCatalog() {
 
       /* Find the current teacher in the list of teachers for this class.
        * The API returns all teachers for the class, so we filter by ID. */
-      const myAssignment = response.data.find((t) => t.teacherId === currentUserId);
+      const myAssignment = response.find((t) => t.teacherId === currentUserId);
 
       return myAssignment?.subjects ?? [];
     } catch (e: unknown) {
@@ -274,7 +266,7 @@ export function useCatalog() {
       const response = await api<GradesResponse>(
         `/catalog/classes/${classId}/subjects/${subjectId}/grades?semester=${semester}`,
       );
-      gradeGrid.value = response.data.students;
+      gradeGrid.value = response.students;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca notele';
       gradeGrid.value = [];
@@ -332,7 +324,7 @@ export function useCatalog() {
         /* Also enqueue for sync safety — the server deduplicates by client_id */
         await enqueueMutation('grade', 'create', body);
 
-        return response.data;
+        return response;
       } else {
         /* Offline path: enqueue the mutation for later sync */
         await enqueueMutation('grade', 'create', body);
@@ -393,7 +385,7 @@ export function useCatalog() {
           grade_id: gradeId,
         });
 
-        return response.data;
+        return response;
       } else {
         /* Offline: enqueue for later */
         await enqueueMutation('grade', 'update', {
