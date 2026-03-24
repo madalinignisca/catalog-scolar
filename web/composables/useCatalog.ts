@@ -171,9 +171,18 @@ type ClassTeachersResponse = Array<{
   hoursPerWeek: number;
 }>;
 
-/** Response type for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades) */
+/**
+ * Response type for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades).
+ * The API returns a nested structure where each entry has a `student` object
+ * and a `grades` array. After snakeToCamel conversion:
+ *   { students: [{ student: { id, firstName, lastName }, grades: [...] }] }
+ * We flatten this in fetchClassGrades() to match StudentWithGrades.
+ */
 interface GradesResponse {
-  students: StudentWithGrades[];
+  students: Array<{
+    student: { id: string; firstName: string; lastName: string };
+    grades: Grade[];
+  }>;
 }
 
 /** Response type for single grade operations (POST/PUT) */
@@ -281,7 +290,18 @@ export function useCatalog() {
       const response = await api<GradesResponse>(
         `/catalog/classes/${classId}/subjects/${subjectId}/grades?semester=${semester}`,
       );
-      gradeGrid.value = response.students;
+
+      // Flatten the nested API response into the StudentWithGrades format.
+      // API returns: { student: { id, firstName, lastName }, grades: [...] }
+      // We need:    { studentId, firstName, lastName, grades: [...], average, qualifierFinal }
+      gradeGrid.value = response.students.map((entry) => ({
+        studentId: entry.student.id,
+        firstName: entry.student.firstName,
+        lastName: entry.student.lastName,
+        grades: entry.grades,
+        average: computeNumericAverage(entry.grades),
+        qualifierFinal: null,
+      }));
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca notele';
       gradeGrid.value = [];
