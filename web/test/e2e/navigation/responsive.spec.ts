@@ -50,254 +50,244 @@ test.use({
 
 // ── Test 34 ────────────────────────────────────────────────────────────────────
 
-test(
-  '34 – mobile viewport hides the sidebar and shows the hamburger button',
-  async ({ teacherPage }) => {
-    /**
-     * On a 375 px wide screen the desktop sidebar should not be visible —
-     * it is either translated off-screen (transform: translateX(-100%)) or
-     * hidden with display:none / visibility:hidden via Tailwind responsive classes.
-     *
-     * Playwright's isVisible() returns false for any of those CSS states,
-     * which is the correct observable behaviour from a user's perspective.
-     *
-     * Conversely, the hamburger toggle button must be visible so the user has
-     * a way to open the navigation menu.
-     *
-     * TIMING NOTE: The fixture logs in at the default viewport size, then
-     * test.use() applies the 375 px viewport. We wait for the hamburger to
-     * be visible before checking the sidebar, but we also wait for the
-     * sidebar to reach its hidden state (CSS transition may be in progress)
-     * using toBeHidden() which polls until the element is no longer visible.
-     */
-    const layout = new LayoutPage(teacherPage);
+test('34 – mobile viewport hides the sidebar and shows the hamburger button', async ({
+  teacherPage,
+}) => {
+  /**
+   * On a 375 px wide screen the desktop sidebar should not be visible —
+   * it is either translated off-screen (transform: translateX(-100%)) or
+   * hidden with display:none / visibility:hidden via Tailwind responsive classes.
+   *
+   * Playwright's isVisible() returns false for any of those CSS states,
+   * which is the correct observable behaviour from a user's perspective.
+   *
+   * Conversely, the hamburger toggle button must be visible so the user has
+   * a way to open the navigation menu.
+   *
+   * TIMING NOTE: The fixture logs in at the default viewport size, then
+   * test.use() applies the 375 px viewport. We wait for the hamburger to
+   * be visible before checking the sidebar, but we also wait for the
+   * sidebar to reach its hidden state (CSS transition may be in progress)
+   * using toBeHidden() which polls until the element is no longer visible.
+   */
+  const layout = new LayoutPage(teacherPage);
 
-    // Wait for the mobile menu button to appear. This confirms the page has
-    // rendered at the mobile viewport and the Nuxt hydration is complete.
-    // Allow 15 s for the fixture-based login to complete.
-    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
+  // Wait for the mobile menu button to appear. This confirms the page has
+  // rendered at the mobile viewport and the Nuxt hydration is complete.
+  // Allow 15 s for the fixture-based login to complete.
+  await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
-    // Give the CSS transition a moment to settle after the viewport change
-    // applied by test.use(). The sidebar uses transition-transform duration-200
-    // so we wait briefly before asserting its off-screen state.
-    await teacherPage.waitForTimeout(300);
+  // Give the CSS transition a moment to settle after the viewport change
+  // applied by test.use(). The sidebar uses transition-transform duration-200
+  // so we wait briefly before asserting its off-screen state.
+  await teacherPage.waitForTimeout(300);
 
-    // ── Sidebar should be off-screen on mobile ────────────────────────────────
-    // The sidebar is hidden via CSS transform: translateX(-100%) on mobile —
-    // NOT via display:none. Playwright's toBeHidden() only detects display/
-    // visibility/opacity changes, not translate. We use toBeInViewport() with
-    // the ratio threshold to confirm the sidebar is NOT visible to the user.
-    // toBeInViewport({ ratio: 0 }) passes when the element has zero intersection
-    // with the visible viewport — i.e., fully translated off-screen.
-    await expect(
-      layout.sidebar,
-      'Sidebar should be off-screen on mobile before the menu is opened',
-    ).not.toBeInViewport({ timeout: 5_000 });
+  // ── Sidebar should be off-screen on mobile ────────────────────────────────
+  // The sidebar is hidden via CSS transform: translateX(-100%) on mobile —
+  // NOT via display:none. Playwright's toBeHidden() only detects display/
+  // visibility/opacity changes, not translate. We use toBeInViewport() with
+  // the ratio threshold to confirm the sidebar is NOT visible to the user.
+  // toBeInViewport({ ratio: 0 }) passes when the element has zero intersection
+  // with the visible viewport — i.e., fully translated off-screen.
+  await expect(
+    layout.sidebar,
+    'Sidebar should be off-screen on mobile before the menu is opened',
+  ).not.toBeInViewport({ timeout: 5_000 });
 
-    // ── Hamburger must be visible ─────────────────────────────────────────────
-    // isHamburgerVisible() calls isVisible() on [data-testid="mobile-menu-button"].
-    const hamburgerVisible = await layout.isHamburgerVisible();
-    expect(
-      hamburgerVisible,
-      'Hamburger button should be visible on mobile viewports',
-    ).toBe(true);
-  },
-);
+  // ── Hamburger must be visible ─────────────────────────────────────────────
+  // isHamburgerVisible() calls isVisible() on [data-testid="mobile-menu-button"].
+  const hamburgerVisible = await layout.isHamburgerVisible();
+  expect(hamburgerVisible, 'Hamburger button should be visible on mobile viewports').toBe(true);
+});
 
 // ── Test 35 ────────────────────────────────────────────────────────────────────
 
-test(
-  '35 – clicking the hamburger button opens the sidebar drawer and backdrop',
-  async ({ teacherPage }) => {
-    /**
-     * After the hamburger is clicked the sidebar slides in from the left and
-     * a semi-transparent overlay is rendered behind it.
-     *
-     * We assert both:
-     *   a) The sidebar itself becomes visible (the drawer is open).
-     *   b) The overlay/backdrop is rendered (so the user can dismiss the menu
-     *      by tapping outside it).
-     *
-     * openMobileMenu() is a LayoutPage helper that clicks the hamburger button.
-     * After the click, Nuxt's v-if / CSS transition runs; we use toBeVisible()
-     * which automatically waits for the element to appear (up to the default
-     * Playwright timeout of 5 s).
-     */
-    const layout = new LayoutPage(teacherPage);
+test('35 – clicking the hamburger button opens the sidebar drawer and backdrop', async ({
+  teacherPage,
+}) => {
+  /**
+   * After the hamburger is clicked the sidebar slides in from the left and
+   * a semi-transparent overlay is rendered behind it.
+   *
+   * We assert both:
+   *   a) The sidebar itself becomes visible (the drawer is open).
+   *   b) The overlay/backdrop is rendered (so the user can dismiss the menu
+   *      by tapping outside it).
+   *
+   * openMobileMenu() is a LayoutPage helper that clicks the hamburger button.
+   * After the click, Nuxt's v-if / CSS transition runs; we use toBeVisible()
+   * which automatically waits for the element to appear (up to the default
+   * Playwright timeout of 5 s).
+   */
+  const layout = new LayoutPage(teacherPage);
 
-    // Precondition: sidebar is closed and hamburger is available.
-    // Allow 15 s for the fixture-based login and initial page render to settle.
-    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
+  // Precondition: sidebar is closed and hamburger is available.
+  // Allow 15 s for the fixture-based login and initial page render to settle.
+  await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
-    // Wait for Vue hydration to complete so the @click handler is attached.
-    // Without this, the button is server-rendered HTML and clicking it does
-    // nothing because the event listener hasn't been registered yet.
-    await teacherPage.waitForFunction(
-      () => {
-        const el = document.querySelector('#__nuxt');
-        return el != null && '__vue_app__' in el;
-      },
-      { timeout: 10_000 },
-    );
+  // Wait for Vue hydration to complete so the @click handler is attached.
+  // Without this, the button is server-rendered HTML and clicking it does
+  // nothing because the event listener hasn't been registered yet.
+  await teacherPage.waitForFunction(
+    () => {
+      const el = document.querySelector('#__nuxt');
+      return el != null && '__vue_app__' in el;
+    },
+    { timeout: 10_000 },
+  );
 
-    // Open the mobile sidebar drawer.
-    await layout.openMobileMenu();
+  // Open the mobile sidebar drawer.
+  await layout.openMobileMenu();
 
-    // ── Sidebar must now be visible ───────────────────────────────────────────
-    // After clicking the hamburger, the sidebar slides in from the left.
-    // We increase the timeout to 10 s to account for the CSS slide-in
-    // animation (transition-transform duration-300) and any Vue reactivity
-    // delay on slower CI machines. The sidebar entering the viewport is the
-    // primary signal that the drawer opened correctly.
+  // ── Sidebar must now be visible ───────────────────────────────────────────
+  // After clicking the hamburger, the sidebar slides in from the left.
+  // We increase the timeout to 10 s to account for the CSS slide-in
+  // animation (transition-transform duration-300) and any Vue reactivity
+  // delay on slower CI machines. The sidebar entering the viewport is the
+  // primary signal that the drawer opened correctly.
+  await expect(layout.sidebar, 'Sidebar drawer should be visible after opening').toBeInViewport({
+    timeout: 10_000,
+  });
+
+  // ── Backdrop/overlay must be rendered ─────────────────────────────────────
+  // The overlay element ([data-testid="sidebar-overlay"]) is rendered via
+  // v-if when the drawer is open, so toBeVisible() also confirms it was
+  // inserted into the DOM, not just that it has a non-zero opacity.
+  // We check this AFTER confirming the sidebar is in the viewport so we
+  // know the drawer animation has settled before querying the overlay.
+  // If the overlay is not present (e.g. not yet implemented), we fall back
+  // to simply confirming the sidebar itself is visible — this prevents the
+  // test from failing on overlay-render timing when the sidebar IS open.
+  // Wait for the overlay to appear. Use waitFor() which properly polls
+  // (unlike isVisible() which is a single instant check with no retry).
+  const overlayAppeared = await layout.sidebarOverlay
+    .waitFor({ state: 'visible', timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!overlayAppeared) {
+    // Overlay not rendered within 5s — assert the sidebar itself is visible
+    // as fallback proof the drawer opened. The overlay can lag behind on
+    // slower machines or when the CSS transition timing varies.
     await expect(
       layout.sidebar,
-      'Sidebar drawer should be visible after opening',
-    ).toBeInViewport({ timeout: 10_000 });
-
-    // ── Backdrop/overlay must be rendered ─────────────────────────────────────
-    // The overlay element ([data-testid="sidebar-overlay"]) is rendered via
-    // v-if when the drawer is open, so toBeVisible() also confirms it was
-    // inserted into the DOM, not just that it has a non-zero opacity.
-    // We check this AFTER confirming the sidebar is in the viewport so we
-    // know the drawer animation has settled before querying the overlay.
-    // If the overlay is not present (e.g. not yet implemented), we fall back
-    // to simply confirming the sidebar itself is visible — this prevents the
-    // test from failing on overlay-render timing when the sidebar IS open.
-    // Wait for the overlay to appear. Use waitFor() which properly polls
-    // (unlike isVisible() which is a single instant check with no retry).
-    const overlayAppeared = await layout.sidebarOverlay
-      .waitFor({ state: 'visible', timeout: 5_000 })
-      .then(() => true)
-      .catch(() => false);
-
-    if (!overlayAppeared) {
-      // Overlay not rendered within 5s — assert the sidebar itself is visible
-      // as fallback proof the drawer opened. The overlay can lag behind on
-      // slower machines or when the CSS transition timing varies.
-      await expect(
-        layout.sidebar,
-        'Sidebar drawer should be visible after opening (overlay not yet rendered)',
-      ).toBeVisible({ timeout: 5_000 });
-    }
-  },
-);
+      'Sidebar drawer should be visible after opening (overlay not yet rendered)',
+    ).toBeVisible({ timeout: 5_000 });
+  }
+});
 
 // ── Test 36 ────────────────────────────────────────────────────────────────────
 
-test(
-  '36 – clicking the backdrop closes the mobile sidebar drawer',
-  async ({ teacherPage }) => {
-    /**
-     * The semi-transparent overlay behind the open sidebar drawer doubles as a
-     * "click outside to close" affordance — the most natural mobile gesture for
-     * dismissing a drawer.
-     *
-     * Test flow:
-     *   1. Open the sidebar via the hamburger button.
-     *   2. Wait for BOTH the sidebar AND the overlay to be fully visible
-     *      (drawer is completely open — no mid-animation race).
-     *   3. Click the overlay via closeMobileMenu().
-     *   4. Assert the sidebar is no longer visible (with timeout for animation).
-     *
-     * closeMobileMenu() clicks [data-testid="sidebar-overlay"]. After the
-     * click, Nuxt removes or hides the drawer via v-if / CSS transition.
-     */
-    const layout = new LayoutPage(teacherPage);
+test('36 – clicking the backdrop closes the mobile sidebar drawer', async ({ teacherPage }) => {
+  /**
+   * The semi-transparent overlay behind the open sidebar drawer doubles as a
+   * "click outside to close" affordance — the most natural mobile gesture for
+   * dismissing a drawer.
+   *
+   * Test flow:
+   *   1. Open the sidebar via the hamburger button.
+   *   2. Wait for BOTH the sidebar AND the overlay to be fully visible
+   *      (drawer is completely open — no mid-animation race).
+   *   3. Click the overlay via closeMobileMenu().
+   *   4. Assert the sidebar is no longer visible (with timeout for animation).
+   *
+   * closeMobileMenu() clicks [data-testid="sidebar-overlay"]. After the
+   * click, Nuxt removes or hides the drawer via v-if / CSS transition.
+   */
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Step 1: Open the drawer ───────────────────────────────────────────────
-    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
+  // ── Step 1: Open the drawer ───────────────────────────────────────────────
+  await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
-    // Wait for Vue hydration so the @click handler is attached.
-    await teacherPage.waitForFunction(
-      () => {
-        const el = document.querySelector('#__nuxt');
-        return el != null && '__vue_app__' in el;
-      },
-      { timeout: 10_000 },
-    );
+  // Wait for Vue hydration so the @click handler is attached.
+  await teacherPage.waitForFunction(
+    () => {
+      const el = document.querySelector('#__nuxt');
+      return el != null && '__vue_app__' in el;
+    },
+    { timeout: 10_000 },
+  );
 
-    await layout.openMobileMenu();
+  await layout.openMobileMenu();
 
-    // ── Step 2: Wait for the drawer to be fully open ──────────────────────────
-    // Wait for BOTH the sidebar AND the overlay to be visible before clicking.
-    // This prevents a race where we click the overlay before it finishes
-    // rendering (v-if transition) and the click lands on an empty area.
-    // The sidebar enters viewport when isSidebarOpen = true (translate-x-0).
-    await expect(layout.sidebar).toBeInViewport({ timeout: 8_000 });
-    // The overlay is rendered via v-if so toBeVisible() confirms it's in the DOM.
-    await expect(layout.sidebarOverlay).toBeVisible({ timeout: 8_000 });
+  // ── Step 2: Wait for the drawer to be fully open ──────────────────────────
+  // Wait for BOTH the sidebar AND the overlay to be visible before clicking.
+  // This prevents a race where we click the overlay before it finishes
+  // rendering (v-if transition) and the click lands on an empty area.
+  // The sidebar enters viewport when isSidebarOpen = true (translate-x-0).
+  await expect(layout.sidebar).toBeInViewport({ timeout: 8_000 });
+  // The overlay is rendered via v-if so toBeVisible() confirms it's in the DOM.
+  await expect(layout.sidebarOverlay).toBeVisible({ timeout: 8_000 });
 
-    // ── Step 3: Click the overlay to close ───────────────────────────────────
-    await layout.closeMobileMenu();
+  // ── Step 3: Click the overlay to close ───────────────────────────────────
+  await layout.closeMobileMenu();
 
-    // ── Step 4: Overlay must disappear ──────────────────────────────────────
-    // The overlay uses v-if="isSidebarOpen", so it's removed from the DOM
-    // when the sidebar closes. This is more reliable than checking the sidebar
-    // transform (which races with CSS animations).
-    await expect(
-      layout.sidebarOverlay,
-      'Sidebar overlay should be removed after clicking it',
-    ).not.toBeVisible({ timeout: 8_000 });
-  },
-);
+  // ── Step 4: Overlay must disappear ──────────────────────────────────────
+  // The overlay uses v-if="isSidebarOpen", so it's removed from the DOM
+  // when the sidebar closes. This is more reliable than checking the sidebar
+  // transform (which races with CSS animations).
+  await expect(
+    layout.sidebarOverlay,
+    'Sidebar overlay should be removed after clicking it',
+  ).not.toBeVisible({ timeout: 8_000 });
+});
 
 // ── Test 37 ────────────────────────────────────────────────────────────────────
 
-test(
-  '37 – tapping a nav item in the mobile drawer navigates to the correct route',
-  async ({ teacherPage }) => {
-    /**
-     * This test verifies the full mobile navigation flow:
-     *   1. Open the sidebar drawer via the hamburger.
-     *   2. Tap the "Absențe" nav item inside the drawer.
-     *   3. Confirm the app navigates to /absences.
-     *
-     * WHY "Absențe"?
-     * We pick the absences route because it is the only nav item whose URL
-     * (/absences) differs from the root ("/") used by both dashboard and
-     * catalog items. This makes the navigation assertion unambiguous.
-     *
-     * TIMING NOTE: We must wait for the nav items inside the drawer to be
-     * interactable before clicking. The sidebar uses a CSS slide-in animation;
-     * if we click a nav item while the animation is mid-way, the click may
-     * miss or land on the overlay instead of the link. We wait for the first
-     * nav item to be visible inside the open sidebar before clicking.
-     */
-    const layout = new LayoutPage(teacherPage);
+test('37 – tapping a nav item in the mobile drawer navigates to the correct route', async ({
+  teacherPage,
+}) => {
+  /**
+   * This test verifies the full mobile navigation flow:
+   *   1. Open the sidebar drawer via the hamburger.
+   *   2. Tap the "Absențe" nav item inside the drawer.
+   *   3. Confirm the app navigates to /absences.
+   *
+   * WHY "Absențe"?
+   * We pick the absences route because it is the only nav item whose URL
+   * (/absences) differs from the root ("/") used by both dashboard and
+   * catalog items. This makes the navigation assertion unambiguous.
+   *
+   * TIMING NOTE: We must wait for the nav items inside the drawer to be
+   * interactable before clicking. The sidebar uses a CSS slide-in animation;
+   * if we click a nav item while the animation is mid-way, the click may
+   * miss or land on the overlay instead of the link. We wait for the first
+   * nav item to be visible inside the open sidebar before clicking.
+   */
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Step 1: Open the mobile drawer ───────────────────────────────────────
-    await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
+  // ── Step 1: Open the mobile drawer ───────────────────────────────────────
+  await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
-    // Wait for Vue hydration so the @click handler is attached.
-    await teacherPage.waitForFunction(
-      () => {
-        const el = document.querySelector('#__nuxt');
-        return el != null && '__vue_app__' in el;
-      },
-      { timeout: 10_000 },
-    );
-    await layout.openMobileMenu();
+  // Wait for Vue hydration so the @click handler is attached.
+  await teacherPage.waitForFunction(
+    () => {
+      const el = document.querySelector('#__nuxt');
+      return el != null && '__vue_app__' in el;
+    },
+    { timeout: 10_000 },
+  );
+  await layout.openMobileMenu();
 
-    // Wait for the drawer to be fully open AND for the nav items inside it to
-    // be interactable. We check the first nav item's visibility with a timeout
-    // to account for the CSS slide-in animation completing.
-    await expect(layout.sidebar).toBeVisible({ timeout: 5_000 });
-    await expect(layout.navItems.first()).toBeVisible({ timeout: 5_000 });
+  // Wait for the drawer to be fully open AND for the nav items inside it to
+  // be interactable. We check the first nav item's visibility with a timeout
+  // to account for the CSS slide-in animation completing.
+  await expect(layout.sidebar).toBeVisible({ timeout: 5_000 });
+  await expect(layout.navItems.first()).toBeVisible({ timeout: 5_000 });
 
-    // ── Step 2: Click the Absențe nav item ───────────────────────────────────
-    // We use a regex-safe partial label that handles both "Absențe" (with ț)
-    // and "Absente" (ASCII fallback), case-insensitively.
-    // navItems.filter({ hasText: ... }) scopes the match to nav items only,
-    // preventing accidental matches elsewhere on the page.
-    await layout.navItems.filter({ hasText: /absen/i }).click();
+  // ── Step 2: Click the Absențe nav item ───────────────────────────────────
+  // We use a regex-safe partial label that handles both "Absențe" (with ț)
+  // and "Absente" (ASCII fallback), case-insensitively.
+  // navItems.filter({ hasText: ... }) scopes the match to nav items only,
+  // preventing accidental matches elsewhere on the page.
+  await layout.navItems.filter({ hasText: /absen/i }).click();
 
-    // ── Step 3: Assert navigation to /absences ────────────────────────────────
-    // waitForURL waits up to 15 s for the Nuxt router to complete navigation.
-    // The generous timeout accounts for route transition animations on mobile
-    // and potential CI environment slowness.
-    await teacherPage.waitForURL('**/absences', { timeout: 15_000 });
+  // ── Step 3: Assert navigation to /absences ────────────────────────────────
+  // waitForURL waits up to 15 s for the Nuxt router to complete navigation.
+  // The generous timeout accounts for route transition animations on mobile
+  // and potential CI environment slowness.
+  await teacherPage.waitForURL('**/absences', { timeout: 15_000 });
 
-    // Final synchronous confirmation: the URL must contain /absences.
-    expect(teacherPage.url()).toContain('/absences');
-  },
-);
+  // Final synchronous confirmation: the URL must contain /absences.
+  expect(teacherPage.url()).toContain('/absences');
+});

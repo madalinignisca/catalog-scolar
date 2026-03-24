@@ -157,7 +157,11 @@ const roleLabels: Record<string, string> = {
       </div>
 
       <!-- Loading -->
-      <div data-testid="activate-loading" v-if="state === 'loading'" class="py-8 text-center text-gray-500">
+      <div
+        data-testid="activate-loading"
+        v-if="state === 'loading'"
+        class="py-8 text-center text-gray-500"
+      >
         Se verifică link-ul de activare...
       </div>
 

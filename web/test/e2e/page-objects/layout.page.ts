@@ -183,14 +183,14 @@ export class LayoutPage {
   async getActiveNavItem(): Promise<string | null> {
     // Try aria-current first — this is the accessible, recommended approach.
     const ariaActive = this.navItems.filter({ has: this.page.locator('[aria-current="page"]') });
-    if (await ariaActive.count() > 0) {
+    if ((await ariaActive.count()) > 0) {
       const text = await ariaActive.first().textContent();
       return text !== null ? text.trim() : null;
     }
 
     // Fallback: look for an element with an "active" class.
     const classActive = this.navItems.filter({ has: this.page.locator('.active') });
-    if (await classActive.count() > 0) {
+    if ((await classActive.count()) > 0) {
       const text = await classActive.first().textContent();
       return text !== null ? text.trim() : null;
     }

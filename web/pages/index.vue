@@ -103,7 +103,11 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <!-- LOADING STATE: shown while fetchProfile is in progress             -->
   <!-- ================================================================== -->
-  <div data-testid="dashboard-loading" v-if="pageLoading" class="flex items-center justify-center py-20">
+  <div
+    data-testid="dashboard-loading"
+    v-if="pageLoading"
+    class="flex items-center justify-center py-20"
+  >
     <div class="text-center">
       <div
         class="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"
@@ -182,7 +186,10 @@ function openClass(classItem: TeacherClass): void {
       >
         <!-- Class name and education level badge -->
         <div class="flex items-start justify-between">
-          <h3 data-testid="class-card-name" class="text-lg font-semibold text-gray-900 group-hover:text-blue-700">
+          <h3
+            data-testid="class-card-name"
+            class="text-lg font-semibold text-gray-900 group-hover:text-blue-700"
+          >
             Clasa {{ classItem.name }}
           </h3>
           <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
@@ -191,8 +198,13 @@ function openClass(classItem: TeacherClass): void {
         </div>
 
         <!-- Student count (may come as studentCount or maxStudents depending on API) -->
-        <p v-if="classItem.studentCount || classItem.maxStudents" class="mt-2 text-sm text-gray-500">
-          <span data-testid="class-card-student-count" class="font-medium text-gray-700">{{ classItem.studentCount ?? classItem.maxStudents }}</span>
+        <p
+          v-if="classItem.studentCount || classItem.maxStudents"
+          class="mt-2 text-sm text-gray-500"
+        >
+          <span data-testid="class-card-student-count" class="font-medium text-gray-700">{{
+            classItem.studentCount ?? classItem.maxStudents
+          }}</span>
           {{ (classItem.studentCount ?? classItem.maxStudents) === 1 ? 'elev' : 'elevi' }}
         </p>
 

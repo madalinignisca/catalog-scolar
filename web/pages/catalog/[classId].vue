@@ -198,7 +198,10 @@ function selectSemester(semester: Semester): void {
   <!-- Shown if the class data failed to load.                            -->
   <!-- ================================================================== -->
   <div v-else-if="loadError !== null" class="space-y-4">
-    <div data-testid="catalog-error" class="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+    <div
+      data-testid="catalog-error"
+      class="rounded-lg border border-red-200 bg-red-50 p-6 text-center"
+    >
       <p class="text-sm text-red-700">{{ loadError }}</p>
       <NuxtLink
         to="/"
@@ -236,12 +239,19 @@ function selectSemester(semester: Semester): void {
         </NuxtLink>
 
         <!-- Class name and education level badge -->
-        <h1 data-testid="class-title" class="text-2xl font-bold text-gray-900">Clasa {{ currentClass.name }}</h1>
+        <h1 data-testid="class-title" class="text-2xl font-bold text-gray-900">
+          Clasa {{ currentClass.name }}
+        </h1>
         <p class="mt-0.5 text-sm text-gray-500">
-          <span data-testid="education-level-badge">{{ educationLevelLabels[currentClass.educationLevel] ?? currentClass.educationLevel }}</span>
+          <span data-testid="education-level-badge">{{
+            educationLevelLabels[currentClass.educationLevel] ?? currentClass.educationLevel
+          }}</span>
           &middot;
           <!-- studentCount may not be present in all API responses — guard with optional chaining -->
-          <span v-if="currentClass.studentCount != null" data-testid="catalog-student-count">{{ currentClass.studentCount }} {{ currentClass.studentCount === 1 ? 'elev' : 'elevi' }}</span>
+          <span v-if="currentClass.studentCount != null" data-testid="catalog-student-count"
+            >{{ currentClass.studentCount }}
+            {{ currentClass.studentCount === 1 ? 'elev' : 'elevi' }}</span
+          >
         </p>
       </div>
 

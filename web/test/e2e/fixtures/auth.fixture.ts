@@ -151,10 +151,11 @@ async function gotoWithRetry(page: Page, url: string, timeout = 15_000): Promise
   // For '/' we check the pathname exactly; for other paths we check containment.
   // We swallow timeouts here — the caller's own assertions will surface any
   // real page-state issues. This prevents a double error stack on slow CI.
-  await page.waitForURL(
-    (u) => (url === '/' ? u.pathname === '/' : u.toString().includes(url)),
-    { timeout },
-  ).catch(() => { /* intentionally swallowed — see above */ });
+  await page
+    .waitForURL((u) => (url === '/' ? u.pathname === '/' : u.toString().includes(url)), { timeout })
+    .catch(() => {
+      /* intentionally swallowed — see above */
+    });
 }
 
 /**

@@ -48,7 +48,8 @@ test.describe('token lifecycle', () => {
     // Step 4: Verify the dashboard loaded (not redirected to /login).
     // The silent refresh should have obtained new tokens automatically.
     // Use a generous timeout since the refresh adds a round-trip.
-    const isOnDashboard = await page.waitForURL((url) => url.pathname === '/', { timeout: 10_000 })
+    const isOnDashboard = await page
+      .waitForURL((url) => url.pathname === '/', { timeout: 10_000 })
       .then(() => true)
       .catch(() => false);
 
@@ -58,10 +59,22 @@ test.describe('token lifecycle', () => {
       // fine — what matters is the layout rendered (sidebar, header) rather
       // than being redirected to /login.
       const hasLayout =
-        (await page.getByTestId('sidebar').isVisible().catch(() => false)) ||
-        (await page.getByTestId('dashboard-content').isVisible().catch(() => false)) ||
-        (await page.getByTestId('dashboard-loading').isVisible().catch(() => false)) ||
-        (await page.getByTestId('welcome-message').isVisible().catch(() => false));
+        (await page
+          .getByTestId('sidebar')
+          .isVisible()
+          .catch(() => false)) ||
+        (await page
+          .getByTestId('dashboard-content')
+          .isVisible()
+          .catch(() => false)) ||
+        (await page
+          .getByTestId('dashboard-loading')
+          .isVisible()
+          .catch(() => false)) ||
+        (await page
+          .getByTestId('welcome-message')
+          .isVisible()
+          .catch(() => false));
       expect(hasLayout).toBe(true);
     } else {
       // If redirected to /login, the silent refresh did not work.

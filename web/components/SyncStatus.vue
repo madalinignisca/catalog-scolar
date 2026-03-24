@@ -29,7 +29,9 @@ const { isOnline, pendingMutations } = useOfflineSync();
 
     <!-- Label -->
     <span data-testid="sync-status-label" v-if="!isOnline">Offline</span>
-    <span data-testid="sync-status-label" v-else-if="pendingMutations > 0">Sincronizare ({{ pendingMutations }})</span>
+    <span data-testid="sync-status-label" v-else-if="pendingMutations > 0"
+      >Sincronizare ({{ pendingMutations }})</span
+    >
     <span data-testid="sync-status-label" v-else>Sincronizat</span>
   </div>
 </template>

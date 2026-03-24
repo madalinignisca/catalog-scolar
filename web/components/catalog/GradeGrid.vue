@@ -510,7 +510,10 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 </div>
 
                 <!-- Empty state: no grades yet for this student -->
-                <span v-if="!student.grades || student.grades.length === 0" class="text-xs italic text-gray-400">
+                <span
+                  v-if="!student.grades || student.grades.length === 0"
+                  class="text-xs italic text-gray-400"
+                >
                   Nicio notă
                 </span>
               </div>

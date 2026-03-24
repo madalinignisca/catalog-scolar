@@ -126,339 +126,328 @@ test.afterEach(async ({ teacherPage }) => {
 
 // ── Test 60 ───────────────────────────────────────────────────────────────────
 
-test(
-  '60 – sync status shows "Sincronizat" when online',
-  async ({ teacherPage }) => {
-    /**
-     * When the teacher is online and all changes are uploaded, the sync
-     * status label should display "Sincronizat" (Romanian for "Synced").
-     *
-     * We also verify the sync status dot (a visual indicator — usually a
-     * green circle) is rendered on screen. A PM can interpret: "the green dot
-     * means the teacher's data is safely stored on the server."
-     *
-     * This test is intentionally simple — it validates the BASELINE healthy
-     * state that all other sync tests depart from.
-     */
-    const layout = new LayoutPage(teacherPage);
+test('60 – sync status shows "Sincronizat" when online', async ({ teacherPage }) => {
+  /**
+   * When the teacher is online and all changes are uploaded, the sync
+   * status label should display "Sincronizat" (Romanian for "Synced").
+   *
+   * We also verify the sync status dot (a visual indicator — usually a
+   * green circle) is rendered on screen. A PM can interpret: "the green dot
+   * means the teacher's data is safely stored on the server."
+   *
+   * This test is intentionally simple — it validates the BASELINE healthy
+   * state that all other sync tests depart from.
+   */
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Check sync label ──────────────────────────────────────────────────────
-    // The sync status label should be visible in the layout at all times.
-    await expect(layout.syncStatusLabel).toBeVisible({ timeout: 5_000 });
+  // ── Check sync label ──────────────────────────────────────────────────────
+  // The sync status label should be visible in the layout at all times.
+  await expect(layout.syncStatusLabel).toBeVisible({ timeout: 5_000 });
 
-    // When online and fully synced, the label should contain "Sincronizat".
-    // We use a case-insensitive regex because implementations may vary
-    // capitalisation (e.g. "sincronizat", "Sincronizat", "SINCRONIZAT").
-    await expect(layout.syncStatusLabel).toContainText(/sincronizat/i, {
-      timeout: 5_000,
-    });
+  // When online and fully synced, the label should contain "Sincronizat".
+  // We use a case-insensitive regex because implementations may vary
+  // capitalisation (e.g. "sincronizat", "Sincronizat", "SINCRONIZAT").
+  await expect(layout.syncStatusLabel).toContainText(/sincronizat/i, {
+    timeout: 5_000,
+  });
 
-    // ── Check sync dot ────────────────────────────────────────────────────────
-    // The visual indicator dot next to the label should be rendered.
-    // data-testid="sync-status-dot" is a small colored circle.
-    const syncDot = teacherPage.getByTestId('sync-status-dot');
-    await expect(syncDot).toBeVisible({ timeout: 5_000 });
-  },
-);
+  // ── Check sync dot ────────────────────────────────────────────────────────
+  // The visual indicator dot next to the label should be rendered.
+  // data-testid="sync-status-dot" is a small colored circle.
+  const syncDot = teacherPage.getByTestId('sync-status-dot');
+  await expect(syncDot).toBeVisible({ timeout: 5_000 });
+});
 
 // ── Test 61 ───────────────────────────────────────────────────────────────────
 
-test(
-  '61 – going offline changes the sync indicator to show "Offline"',
-  async ({ teacherPage }) => {
-    /**
-     * When network connectivity is lost, the sync status indicator must
-     * update to reflect the offline state. The teacher should not be left
-     * guessing why their grades are not saving to the server.
-     *
-     * The expected UI change is one of:
-     *   A. The label text changes to include "Offline" (or "offline").
-     *   B. The visual dot changes colour to yellow/amber (class change).
-     *   C. Both A and B simultaneously.
-     *
-     * We assert on the label text because it is the most human-readable
-     * signal and independent of Tailwind colour classes.
-     */
-    const layout = new LayoutPage(teacherPage);
+test('61 – going offline changes the sync indicator to show "Offline"', async ({ teacherPage }) => {
+  /**
+   * When network connectivity is lost, the sync status indicator must
+   * update to reflect the offline state. The teacher should not be left
+   * guessing why their grades are not saving to the server.
+   *
+   * The expected UI change is one of:
+   *   A. The label text changes to include "Offline" (or "offline").
+   *   B. The visual dot changes colour to yellow/amber (class change).
+   *   C. Both A and B simultaneously.
+   *
+   * We assert on the label text because it is the most human-readable
+   * signal and independent of Tailwind colour classes.
+   */
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Go offline ────────────────────────────────────────────────────────────
-    // Block all outgoing network requests from this browser context.
-    await teacherPage.context().setOffline(true);
+  // ── Go offline ────────────────────────────────────────────────────────────
+  // Block all outgoing network requests from this browser context.
+  await teacherPage.context().setOffline(true);
 
-    // ── Verify offline indicator ──────────────────────────────────────────────
-    // After going offline the sync label should change to reflect the new state.
-    // We allow a short timeout for the Vue reactivity system to update the DOM.
-    // The label should contain "Offline" or the sync status container should
-    // receive an offline-related attribute/class.
-    //
-    // We check for text "Offline" (case-insensitive) as the primary assertion.
-    // If the implementation uses a different Romanian term (e.g. "Fără conexiune"),
-    // this assertion must be updated to match.
-    await expect(layout.syncStatusLabel).toContainText(/offline|fără conexiune/i, {
-      timeout: 8_000,
-    });
-  },
-);
+  // ── Verify offline indicator ──────────────────────────────────────────────
+  // After going offline the sync label should change to reflect the new state.
+  // We allow a short timeout for the Vue reactivity system to update the DOM.
+  // The label should contain "Offline" or the sync status container should
+  // receive an offline-related attribute/class.
+  //
+  // We check for text "Offline" (case-insensitive) as the primary assertion.
+  // If the implementation uses a different Romanian term (e.g. "Fără conexiune"),
+  // this assertion must be updated to match.
+  await expect(layout.syncStatusLabel).toContainText(/offline|fără conexiune/i, {
+    timeout: 8_000,
+  });
+});
 
 // ── Test 62 ───────────────────────────────────────────────────────────────────
 
-test(
-  '62 – adding a grade while offline shows an optimistic update and pending count',
-  async ({ teacherPage }) => {
-    /**
-     * When the teacher adds a grade while offline, the CatalogRO UI should:
-     *   1. Write the grade to IndexedDB immediately (the sync queue).
-     *   2. Display the grade badge in the catalog grid right away — the user
-     *      does not have to wait for a server round-trip (optimistic update).
-     *   3. Update the sync status label to show a pending count, e.g.
-     *      "Sincronizare (1)" or "1 modificare în așteptare".
-     *
-     * This optimistic update pattern is essential for offline usability:
-     * teachers should be able to continue entering grades even without a
-     * network connection, trusting the app to sync later.
-     *
-     * We use Matei Mureșan who has no CLR seed grades — so any badge we see
-     * in their row must have been added by this test.
-     */
-    const catalogPage = new CatalogPage(teacherPage);
-    const modal = new GradeInputModal(teacherPage);
-    const layout = new LayoutPage(teacherPage);
+test('62 – adding a grade while offline shows an optimistic update and pending count', async ({
+  teacherPage,
+}) => {
+  /**
+   * When the teacher adds a grade while offline, the CatalogRO UI should:
+   *   1. Write the grade to IndexedDB immediately (the sync queue).
+   *   2. Display the grade badge in the catalog grid right away — the user
+   *      does not have to wait for a server round-trip (optimistic update).
+   *   3. Update the sync status label to show a pending count, e.g.
+   *      "Sincronizare (1)" or "1 modificare în așteptare".
+   *
+   * This optimistic update pattern is essential for offline usability:
+   * teachers should be able to continue entering grades even without a
+   * network connection, trusting the app to sync later.
+   *
+   * We use Matei Mureșan who has no CLR seed grades — so any badge we see
+   * in their row must have been added by this test.
+   */
+  const catalogPage = new CatalogPage(teacherPage);
+  const modal = new GradeInputModal(teacherPage);
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Go offline before adding the grade ────────────────────────────────────
-    await teacherPage.context().setOffline(true);
+  // ── Go offline before adding the grade ────────────────────────────────────
+  await teacherPage.context().setOffline(true);
 
-    // ── Open add-grade modal for Andrei Moldovan ──────────────────────────────
-    // Mureșan has no seed grades so his row is not in the grid. We use Moldovan
-    // (has seed grade FB) whose row is present in the grade grid.
-    await catalogPage.clickAddGrade('Moldovan');
+  // ── Open add-grade modal for Andrei Moldovan ──────────────────────────────
+  // Mureșan has no seed grades so his row is not in the grid. We use Moldovan
+  // (has seed grade FB) whose row is present in the grade grid.
+  await catalogPage.clickAddGrade('Moldovan');
 
-    // The modal must be visible before we fill values.
-    await expect(modal.modal).toBeVisible({ timeout: 5_000 });
+  // The modal must be visible before we fill values.
+  await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
-    // ── Enter a qualifier grade (S = Suficient) ───────────────────────────────
-    // Class 2A is a primary school class so we use qualifier buttons.
-    await modal.selectQualifier('S');
-    await modal.setDate(todayISO());
+  // ── Enter a qualifier grade (S = Suficient) ───────────────────────────────
+  // Class 2A is a primary school class so we use qualifier buttons.
+  await modal.selectQualifier('S');
+  await modal.setDate(todayISO());
 
-    // ── Save the grade while still offline ────────────────────────────────────
-    await modal.save();
+  // ── Save the grade while still offline ────────────────────────────────────
+  await modal.save();
 
-    // ── Optimistic update: modal closes ──────────────────────────────────────
-    // Even without a network the modal should close immediately because the
-    // grade was written to IndexedDB (the local cache).
-    await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
+  // ── Optimistic update: modal closes ──────────────────────────────────────
+  // Even without a network the modal should close immediately because the
+  // grade was written to IndexedDB (the local cache).
+  await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-    // ── Optimistic update: badge appears in the grid ──────────────────────────
-    // Moldovan's row should now show an additional grade badge for the grade
-    // we just entered (S = Suficient) while offline.
-    const muresanBadges = catalogPage.getGradeBadges('Moldovan');
-    await expect(muresanBadges.first()).toBeVisible({ timeout: 5_000 });
+  // ── Optimistic update: badge appears in the grid ──────────────────────────
+  // Moldovan's row should now show an additional grade badge for the grade
+  // we just entered (S = Suficient) while offline.
+  const muresanBadges = catalogPage.getGradeBadges('Moldovan');
+  await expect(muresanBadges.first()).toBeVisible({ timeout: 5_000 });
 
-    // The badge list should contain the qualifier we selected ("S").
-    const badgeTexts = await muresanBadges.allTextContents();
-    expect(badgeTexts.some((t) => t.trim().includes('S'))).toBe(true);
+  // The badge list should contain the qualifier we selected ("S").
+  const badgeTexts = await muresanBadges.allTextContents();
+  expect(badgeTexts.some((t) => t.trim().includes('S'))).toBe(true);
 
-    // ── Sync count increments ─────────────────────────────────────────────────
-    // The sync status label should now indicate 1 pending offline mutation.
-    // SyncStatus.vue renders:
-    //   - "Sincronizare (N)" when pendingMutations > 0 and online
-    //   - "Offline" when isOnline is false
-    //   - "Sincronizat" when online and no pending mutations
-    //
-    // While offline, pendingMutations increments in IndexedDB. The label may
-    // show "Sincronizare (1)" (if online detected) or just "Offline" (if the
-    // browser already sees offline). We accept either: a count in the label
-    // OR the Offline state (which proves the grade was enqueued, not lost).
-    const syncLabelText = await layout.syncStatusLabel.textContent();
-    const labelHasCount = /\d+/.test(syncLabelText ?? '');
-    const labelIsOffline = /offline/i.test(syncLabelText ?? '');
-    expect(
-      labelHasCount || labelIsOffline,
-      `Expected sync label to show a pending count or "Offline" state. ` +
-        `Got: "${(syncLabelText ?? '').trim()}"`,
-    ).toBe(true);
-  },
-);
+  // ── Sync count increments ─────────────────────────────────────────────────
+  // The sync status label should now indicate 1 pending offline mutation.
+  // SyncStatus.vue renders:
+  //   - "Sincronizare (N)" when pendingMutations > 0 and online
+  //   - "Offline" when isOnline is false
+  //   - "Sincronizat" when online and no pending mutations
+  //
+  // While offline, pendingMutations increments in IndexedDB. The label may
+  // show "Sincronizare (1)" (if online detected) or just "Offline" (if the
+  // browser already sees offline). We accept either: a count in the label
+  // OR the Offline state (which proves the grade was enqueued, not lost).
+  const syncLabelText = await layout.syncStatusLabel.textContent();
+  const labelHasCount = /\d+/.test(syncLabelText ?? '');
+  const labelIsOffline = /offline/i.test(syncLabelText ?? '');
+  expect(
+    labelHasCount || labelIsOffline,
+    `Expected sync label to show a pending count or "Offline" state. ` +
+      `Got: "${(syncLabelText ?? '').trim()}"`,
+  ).toBe(true);
+});
 
 // ── Test 63 ───────────────────────────────────────────────────────────────────
 
-test(
-  '63 – coming back online triggers sync and status returns to "Sincronizat"',
-  async ({ teacherPage }) => {
-    // Generous timeout: offline → add grade → online → sync flush → assertion.
-    // The sync engine uses exponential backoff so the first flush can take
-    // several seconds on a restarted CI API server.
-    test.setTimeout(60_000);
-    /**
-     * After a teacher goes offline, adds a grade, then regains connectivity,
-     * the sync queue should automatically flush. The sync status indicator
-     * should cycle through "syncing" and settle back on "Sincronizat".
-     *
-     * This end-to-end flush confirms that:
-     *   - The sync worker detects the network restoration event.
-     *   - The queued mutation is replayed against the API successfully.
-     *   - The UI reflects the completed sync.
-     *
-     * We use Daria Luca who has no CLR seed grades.
-     */
-    const catalogPage = new CatalogPage(teacherPage);
-    const modal = new GradeInputModal(teacherPage);
-    const layout = new LayoutPage(teacherPage);
+test('63 – coming back online triggers sync and status returns to "Sincronizat"', async ({
+  teacherPage,
+}) => {
+  // Generous timeout: offline → add grade → online → sync flush → assertion.
+  // The sync engine uses exponential backoff so the first flush can take
+  // several seconds on a restarted CI API server.
+  test.setTimeout(60_000);
+  /**
+   * After a teacher goes offline, adds a grade, then regains connectivity,
+   * the sync queue should automatically flush. The sync status indicator
+   * should cycle through "syncing" and settle back on "Sincronizat".
+   *
+   * This end-to-end flush confirms that:
+   *   - The sync worker detects the network restoration event.
+   *   - The queued mutation is replayed against the API successfully.
+   *   - The UI reflects the completed sync.
+   *
+   * We use Daria Luca who has no CLR seed grades.
+   */
+  const catalogPage = new CatalogPage(teacherPage);
+  const modal = new GradeInputModal(teacherPage);
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Phase 1: Go offline and add a grade ───────────────────────────────────
-    // Use Moldovan (always has grades → row always visible, even after test 54
-    // which may have deleted Crișan's grades).
-    await teacherPage.context().setOffline(true);
+  // ── Phase 1: Go offline and add a grade ───────────────────────────────────
+  // Use Moldovan (always has grades → row always visible, even after test 54
+  // which may have deleted Crișan's grades).
+  await teacherPage.context().setOffline(true);
 
-    await catalogPage.clickAddGrade('Moldovan');
-    await expect(modal.modal).toBeVisible({ timeout: 5_000 });
-    await modal.selectQualifier('B');
-    await modal.setDate(todayISO());
-    await modal.save();
+  await catalogPage.clickAddGrade('Moldovan');
+  await expect(modal.modal).toBeVisible({ timeout: 5_000 });
+  await modal.selectQualifier('B');
+  await modal.setDate(todayISO());
+  await modal.save();
 
-    // Grade saved to IndexedDB — modal should close.
-    await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
+  // Grade saved to IndexedDB — modal should close.
+  await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-    // ── Phase 2: Restore connectivity ────────────────────────────────────────
-    // Re-enable all network requests from this browser context.
-    await teacherPage.context().setOffline(false);
+  // ── Phase 2: Restore connectivity ────────────────────────────────────────
+  // Re-enable all network requests from this browser context.
+  await teacherPage.context().setOffline(false);
 
-    // Manually dispatch the browser 'online' event so the sync engine's
-    // window.addEventListener('online', ...) handler fires immediately.
-    // Playwright's setOffline(false) restores the network at the context
-    // level but does NOT always synthesise the DOM 'online' event, which
-    // means the sync worker may never wake up unless the event is dispatched
-    // explicitly. This is the root cause of the 30 s timeout: the worker was
-    // waiting for an 'online' event that never arrived.
-    await teacherPage.evaluate(() => window.dispatchEvent(new Event('online')));
+  // Manually dispatch the browser 'online' event so the sync engine's
+  // window.addEventListener('online', ...) handler fires immediately.
+  // Playwright's setOffline(false) restores the network at the context
+  // level but does NOT always synthesise the DOM 'online' event, which
+  // means the sync worker may never wake up unless the event is dispatched
+  // explicitly. This is the root cause of the 30 s timeout: the worker was
+  // waiting for an 'online' event that never arrived.
+  await teacherPage.evaluate(() => window.dispatchEvent(new Event('online')));
 
-    // ── Phase 3: Wait for sync to complete ───────────────────────────────────
-    // Once online, the sync worker will POST the queued grade to the API.
-    // We wait for the sync label to return to "Sincronizat" (no pending
-    // mutations), with a generous timeout for the network round-trip.
-    //
-    // Timeout is 30 seconds: the sync engine uses exponential backoff before
-    // its first retry attempt, which can delay the flush by several seconds
-    // in CI environments where the API server may have been restarted by
-    // globalSetup. "Sincronizare (1)" visible in screenshots confirms the
-    // sync is still in progress when asserted at 15 s — 30 s is sufficient.
-    //
-    // RESILIENCE: We also accept the case where the sync label is absent from
-    // the DOM entirely — this can happen if the component unmounts during the
-    // flush. In that case we check that no numeric pending count is visible,
-    // which is equivalent to "zero pending" and also a passing state.
-    // Wait up to 45 s for "Sincronizat". The explicit 'online' event dispatch
-    // above means the sync worker starts immediately, but the API round-trip
-    // and IndexedDB write may still take several seconds on a slow CI box.
-    const syncCompleted = await expect(layout.syncStatusLabel)
-      .toContainText(/sincronizat/i, { timeout: 45_000 })
-      .then(() => true)
-      .catch(() => false);
+  // ── Phase 3: Wait for sync to complete ───────────────────────────────────
+  // Once online, the sync worker will POST the queued grade to the API.
+  // We wait for the sync label to return to "Sincronizat" (no pending
+  // mutations), with a generous timeout for the network round-trip.
+  //
+  // Timeout is 30 seconds: the sync engine uses exponential backoff before
+  // its first retry attempt, which can delay the flush by several seconds
+  // in CI environments where the API server may have been restarted by
+  // globalSetup. "Sincronizare (1)" visible in screenshots confirms the
+  // sync is still in progress when asserted at 15 s — 30 s is sufficient.
+  //
+  // RESILIENCE: We also accept the case where the sync label is absent from
+  // the DOM entirely — this can happen if the component unmounts during the
+  // flush. In that case we check that no numeric pending count is visible,
+  // which is equivalent to "zero pending" and also a passing state.
+  // Wait up to 45 s for "Sincronizat". The explicit 'online' event dispatch
+  // above means the sync worker starts immediately, but the API round-trip
+  // and IndexedDB write may still take several seconds on a slow CI box.
+  const syncCompleted = await expect(layout.syncStatusLabel)
+    .toContainText(/sincronizat/i, { timeout: 45_000 })
+    .then(() => true)
+    .catch(() => false);
 
-    if (!syncCompleted) {
-      // Fallback: accept either no label at all (component unmounted) or
-      // a label with no numeric count (pending count is 0 or absent).
-      // Both states are equivalent to "zero pending" — sync is done.
-      const labelText = await layout.syncStatusLabel.textContent().catch(() => null);
-      const hasPendingCount = /\d+/.test(labelText ?? '');
-      expect(
-        hasPendingCount,
-        `Sync did not complete — label still shows a pending count: "${labelText ?? '(not found)'}"`,
-      ).toBe(false);
-    }
+  if (!syncCompleted) {
+    // Fallback: accept either no label at all (component unmounted) or
+    // a label with no numeric count (pending count is 0 or absent).
+    // Both states are equivalent to "zero pending" — sync is done.
+    const labelText = await layout.syncStatusLabel.textContent().catch(() => null);
+    const hasPendingCount = /\d+/.test(labelText ?? '');
+    expect(
+      hasPendingCount,
+      `Sync did not complete — label still shows a pending count: "${labelText ?? '(not found)'}"`,
+    ).toBe(false);
+  }
 
-    // ── Phase 4: Verify the green/online visual state ─────────────────────────
-    // The sync dot should be visible and reflect the "online + synced" state.
-    // We do not assert the dot's colour (that would couple the test to CSS),
-    // but we confirm the status indicator is stable and shows a healthy state.
-    await expect(layout.syncStatus).toBeVisible({ timeout: 5_000 });
-  },
-);
+  // ── Phase 4: Verify the green/online visual state ─────────────────────────
+  // The sync dot should be visible and reflect the "online + synced" state.
+  // We do not assert the dot's colour (that would couple the test to CSS),
+  // but we confirm the status indicator is stable and shows a healthy state.
+  await expect(layout.syncStatus).toBeVisible({ timeout: 5_000 });
+});
 
 // ── Test 64 ───────────────────────────────────────────────────────────────────
 
-test(
-  '64 – adding 3 grades offline shows a pending count of 3',
-  async ({ teacherPage }) => {
-    // Three modal open/save cycles each involve IndexedDB writes and Vue
-    // reactivity updates. 60 s prevents false timeouts on a slow CI box.
-    test.setTimeout(60_000);
-    /**
-     * Adding multiple grades while offline must accumulate in the sync queue.
-     * The pending count badge should reflect the total number of mutations
-     * that have not yet been flushed to the server.
-     *
-     * This test adds 3 qualifiers for 3 different students (all without CLR
-     * seed grades) and verifies that the sync status label shows the number 3.
-     *
-     * Practical PM interpretation: "A teacher entering 3 grades in a tunnel
-     * should see '3 pending' — not lose any data."
-     *
-     * We target three safe students (Mureșan, Mircea Toma, and Daria Luca).
-     * All have no CLR grades in the seed data.
-     */
-    const catalogPage = new CatalogPage(teacherPage);
-    const modal = new GradeInputModal(teacherPage);
-    const layout = new LayoutPage(teacherPage);
+test('64 – adding 3 grades offline shows a pending count of 3', async ({ teacherPage }) => {
+  // Three modal open/save cycles each involve IndexedDB writes and Vue
+  // reactivity updates. 60 s prevents false timeouts on a slow CI box.
+  test.setTimeout(60_000);
+  /**
+   * Adding multiple grades while offline must accumulate in the sync queue.
+   * The pending count badge should reflect the total number of mutations
+   * that have not yet been flushed to the server.
+   *
+   * This test adds 3 qualifiers for 3 different students (all without CLR
+   * seed grades) and verifies that the sync status label shows the number 3.
+   *
+   * Practical PM interpretation: "A teacher entering 3 grades in a tunnel
+   * should see '3 pending' — not lose any data."
+   *
+   * We target three safe students (Mureșan, Mircea Toma, and Daria Luca).
+   * All have no CLR grades in the seed data.
+   */
+  const catalogPage = new CatalogPage(teacherPage);
+  const modal = new GradeInputModal(teacherPage);
+  const layout = new LayoutPage(teacherPage);
 
-    // ── Go offline ────────────────────────────────────────────────────────────
-    await teacherPage.context().setOffline(true);
+  // ── Go offline ────────────────────────────────────────────────────────────
+  await teacherPage.context().setOffline(true);
 
-    // NOTE: Only Moldovan and Crișan have seed grades and appear in the grid.
-    // Students without grades (Mureșan, Toma, Luca) are not rendered by the API.
-    // We add multiple grades to the 2 visible students to accumulate 3 mutations.
+  // NOTE: Only Moldovan and Crișan have seed grades and appear in the grid.
+  // Students without grades (Mureșan, Toma, Luca) are not rendered by the API.
+  // We add multiple grades to the 2 visible students to accumulate 3 mutations.
 
-    // ── Mutation 1: Moldovan / qualifier FB ───────────────────────────────────
-    await catalogPage.clickAddGrade('Moldovan');
-    await expect(modal.modal).toBeVisible({ timeout: 5_000 });
-    await modal.selectQualifier('FB');
-    await modal.setDate(todayISO());
-    await modal.save();
-    await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
+  // ── Mutation 1: Moldovan / qualifier FB ───────────────────────────────────
+  await catalogPage.clickAddGrade('Moldovan');
+  await expect(modal.modal).toBeVisible({ timeout: 5_000 });
+  await modal.selectQualifier('FB');
+  await modal.setDate(todayISO());
+  await modal.save();
+  await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-    // ── Mutation 2: Moldovan again / qualifier S ─────────────────────────────
-    await catalogPage.clickAddGrade('Moldovan');
-    await expect(modal.modal).toBeVisible({ timeout: 5_000 });
-    await modal.selectQualifier('S');
-    await modal.setDate(todayISO());
-    await modal.save();
-    await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
+  // ── Mutation 2: Moldovan again / qualifier S ─────────────────────────────
+  await catalogPage.clickAddGrade('Moldovan');
+  await expect(modal.modal).toBeVisible({ timeout: 5_000 });
+  await modal.selectQualifier('S');
+  await modal.setDate(todayISO());
+  await modal.save();
+  await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-    // ── Mutation 3: Moldovan / qualifier B (second grade for same student) ────
-    await catalogPage.clickAddGrade('Moldovan');
-    await expect(modal.modal).toBeVisible({ timeout: 5_000 });
-    await modal.selectQualifier('B');
-    await modal.setDate(todayISO());
-    await modal.save();
-    await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
+  // ── Mutation 3: Moldovan / qualifier B (second grade for same student) ────
+  await catalogPage.clickAddGrade('Moldovan');
+  await expect(modal.modal).toBeVisible({ timeout: 5_000 });
+  await modal.selectQualifier('B');
+  await modal.setDate(todayISO());
+  await modal.save();
+  await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-    // ── Verify pending count shows 3 ─────────────────────────────────────────
-    // After three offline mutations, the sync label must include the number 3.
-    // Accepted formats: "(3)", "3 modificări", "Sincronizare (3)", etc.
-    // Timeout increased to 30 s: the Dexie.js sync queue updates IndexedDB
-    // asynchronously after each modal save, and the Vue reactivity cycle that
-    // reads the pending count may lag behind the raw IndexedDB write in CI.
-    //
-    // BROADER ACCEPTANCE: If the label does not show exactly "3" within 30 s,
-    // we accept any state that confirms there ARE pending mutations, i.e. the
-    // label is NOT "Sincronizat" (which would mean the queue is empty — wrong).
-    // This handles the edge case where the count is shown as "3+" or with a
-    // different format than expected, while still proving data was not lost.
-    const countShown = await expect(layout.syncStatusLabel)
-      .toContainText(/3/i, { timeout: 30_000 })
-      .then(() => true)
-      .catch(() => false);
+  // ── Verify pending count shows 3 ─────────────────────────────────────────
+  // After three offline mutations, the sync label must include the number 3.
+  // Accepted formats: "(3)", "3 modificări", "Sincronizare (3)", etc.
+  // Timeout increased to 30 s: the Dexie.js sync queue updates IndexedDB
+  // asynchronously after each modal save, and the Vue reactivity cycle that
+  // reads the pending count may lag behind the raw IndexedDB write in CI.
+  //
+  // BROADER ACCEPTANCE: If the label does not show exactly "3" within 30 s,
+  // we accept any state that confirms there ARE pending mutations, i.e. the
+  // label is NOT "Sincronizat" (which would mean the queue is empty — wrong).
+  // This handles the edge case where the count is shown as "3+" or with a
+  // different format than expected, while still proving data was not lost.
+  const countShown = await expect(layout.syncStatusLabel)
+    .toContainText(/3/i, { timeout: 30_000 })
+    .then(() => true)
+    .catch(() => false);
 
-    if (!countShown) {
-      // Fallback: verify that the label does NOT say "Sincronizat" — if there
-      // are 3 pending mutations the queue cannot be empty. Accepting this
-      // avoids a false failure when the count format differs from expected.
-      const labelText = await layout.syncStatusLabel.textContent().catch(() => '');
-      const isSynced = /sincronizat/i.test(labelText ?? '');
-      expect(
-        isSynced,
-        `Expected pending count "3" or a non-synced state, but label shows: "${(labelText ?? '').trim()}"`,
-      ).toBe(false);
-    }
-  },
-);
+  if (!countShown) {
+    // Fallback: verify that the label does NOT say "Sincronizat" — if there
+    // are 3 pending mutations the queue cannot be empty. Accepting this
+    // avoids a false failure when the count format differs from expected.
+    const labelText = await layout.syncStatusLabel.textContent().catch(() => '');
+    const isSynced = /sincronizat/i.test(labelText ?? '');
+    expect(
+      isSynced,
+      `Expected pending count "3" or a non-synced state, but label shows: "${(labelText ?? '').trim()}"`,
+    ).toBe(false);
+  }
+});

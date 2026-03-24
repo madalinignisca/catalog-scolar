@@ -193,7 +193,9 @@ export class CatalogPage {
         }
         // Wrong card — go back to dashboard and try next
         await this.page.goBack();
-        await this.page.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 5_000 });
+        await this.page
+          .getByTestId('dashboard-content')
+          .waitFor({ state: 'visible', timeout: 5_000 });
       }
       if (!found) {
         throw new Error(`No class card found that navigates to classId: ${classId}`);
@@ -320,9 +322,7 @@ export class CatalogPage {
    * @param studentName - Partial or full student name to identify the row.
    */
   async clickAddGrade(studentName: string): Promise<void> {
-    await this.getStudentRowByName(studentName)
-      .getByTestId('add-grade-button')
-      .click();
+    await this.getStudentRowByName(studentName).getByTestId('add-grade-button').click();
   }
 
   /**

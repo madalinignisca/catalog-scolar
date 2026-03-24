@@ -202,8 +202,14 @@ test.describe('access control', () => {
     // the page body containing "404" or "not found".
     const pageText = (await studentPage.textContent('body')) ?? '';
     const hasPageError =
-      (await studentPage.getByTestId('error-page').isVisible().catch(() => false)) ||
-      (await studentPage.getByTestId('not-found-page').isVisible().catch(() => false)) ||
+      (await studentPage
+        .getByTestId('error-page')
+        .isVisible()
+        .catch(() => false)) ||
+      (await studentPage
+        .getByTestId('not-found-page')
+        .isVisible()
+        .catch(() => false)) ||
       pageText.includes('404') ||
       /not found/i.test(pageText);
 

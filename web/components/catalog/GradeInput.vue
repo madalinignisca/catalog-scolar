@@ -344,7 +344,11 @@ function handleClose(): void {
           </div>
 
           <!-- Validation error message -->
-          <div data-testid="grade-validation-error" v-if="validationError !== ''" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          <div
+            data-testid="grade-validation-error"
+            v-if="validationError !== ''"
+            class="rounded-lg bg-red-50 p-3 text-sm text-red-700"
+          >
             {{ validationError }}
           </div>
 
