@@ -195,10 +195,10 @@ authTest(
     // the API to return fewer rows than the original seed-data count of 2).
     await expect(catalogPage.studentRows.first()).toBeVisible({ timeout: 8_000 });
 
-    // ── Step 3: Open the add-grade modal for Ioana Crișan ────────────────────
-    // Mureșan has no seed grades so his row is not in the grid.
-    // Crișan (seed grade B) is visible in the grid.
-    await catalogPage.clickAddGrade('Crișan');
+    // ── Step 3: Open the add-grade modal for Moldovan ─────────────────────────
+    // Moldovan always has grades so his row is always visible, even after
+    // test 54 which may have deleted Crișan's grades.
+    await catalogPage.clickAddGrade('Moldovan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
     // ── Step 4: Fill in a valid grade and attempt to save ────────────────────

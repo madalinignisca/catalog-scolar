@@ -306,11 +306,11 @@ test(
     const layout = new LayoutPage(teacherPage);
 
     // ── Phase 1: Go offline and add a grade ───────────────────────────────────
-    // Luca has no seed grades so her row is not in the grid. We use Crișan
-    // (has seed grade B) whose row is present in the grade grid.
+    // Use Moldovan (always has grades → row always visible, even after test 54
+    // which may have deleted Crișan's grades).
     await teacherPage.context().setOffline(true);
 
-    await catalogPage.clickAddGrade('Crișan');
+    await catalogPage.clickAddGrade('Moldovan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
     await modal.selectQualifier('B');
     await modal.setDate(todayISO());
@@ -416,8 +416,8 @@ test(
     await modal.save();
     await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-    // ── Mutation 2: Crișan / qualifier S ─────────────────────────────────────
-    await catalogPage.clickAddGrade('Crișan');
+    // ── Mutation 2: Moldovan again / qualifier S ─────────────────────────────
+    await catalogPage.clickAddGrade('Moldovan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
     await modal.selectQualifier('S');
     await modal.setDate(todayISO());
