@@ -159,14 +159,10 @@ test(
       .then(() => true)
       .catch(() => false);
 
-    if (overlayAppeared) {
-      await expect(
-        layout.sidebarOverlay,
-        'Sidebar overlay/backdrop should be visible when the drawer is open',
-      ).toBeVisible();
-    } else {
+    if (!overlayAppeared) {
       // Overlay not rendered within 5s — assert the sidebar itself is visible
-      // as fallback proof the drawer opened.
+      // as fallback proof the drawer opened. The overlay can lag behind on
+      // slower machines or when the CSS transition timing varies.
       await expect(
         layout.sidebar,
         'Sidebar drawer should be visible after opening (overlay not yet rendered)',
