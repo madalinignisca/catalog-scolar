@@ -135,7 +135,7 @@ onMounted(async () => {
 
       /* If the class already has subjects attached (from fetchClasses),
        * use those. Otherwise, fetch them separately. */
-      if (found.subjects.length > 0) {
+      if (Array.isArray(found.subjects) && found.subjects.length > 0) {
         subjects.value = found.subjects;
       } else if (user.value !== null) {
         subjects.value = await fetchTeacherSubjects(classId.value, user.value.id);

@@ -157,19 +157,18 @@ export class CatalogPage {
    * @param classId - The UUID of the class to open, e.g. '018e4c3d-...'
    */
   async goto(classId: string): Promise<void> {
-    // Use client-side (SPA) navigation instead of page.goto() to preserve
+    // Use Nuxt's client-side router instead of page.goto() to preserve
     // the auth tokens in localStorage. A full page.goto() triggers SSR where
     // localStorage is unavailable, causing the auth check to redirect to /login.
     //
-    // We inject a temporary <a> element with the target href, click it (which
-    // triggers Vue Router's client-side navigation), then remove the element.
+    // We access the Vue Router instance through the Nuxt app context and call
+    // router.push() for true SPA navigation (no SSR round-trip).
     await this.page.evaluate((id: string) => {
-      const link = document.createElement('a');
-      link.href = `/catalog/${id}`;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      // Trigger client-side navigation via history + popstate.
+      // This avoids accessing Vue internals and stays within standard Web APIs.
+      // Vue Router listens for popstate events to handle navigation.
+      window.history.pushState({}, '', `/catalog/${id}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
     }, classId);
     await this.page.waitForURL(`**/catalog/${classId}`, { timeout: 15_000 });
   }
