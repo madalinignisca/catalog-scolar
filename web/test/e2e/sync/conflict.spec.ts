@@ -66,13 +66,7 @@ test.afterEach(async ({ teacherPage }) => {
 
 // ── Test 65 ───────────────────────────────────────────────────────────────────
 
-// FIXME: Marked as fixme because the sync engine does not reliably flush the
-// queue after reconnect within the 60s test timeout. The `scheduleSyncSoon()`
-// call on the `online` event fires correctly, but the sync worker's flush may
-// not complete before the timeout due to IndexedDB transaction timing and API
-// round-trip delays. Will be fixed when the sync worker timeout behaviour is
-// tightened.
-test.fixme(
+test(
   '65 – grade added offline persists to server and survives page reload',
   async ({ teacherPage }) => {
     // Full flow: navigate → offline → add grade → online → sync → reload →
