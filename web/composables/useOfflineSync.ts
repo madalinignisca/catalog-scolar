@@ -1,4 +1,4 @@
-import { initSyncEngine, scheduleSyncSoon } from '~/lib/sync-engine';
+import { initSyncEngine, scheduleSyncSoon, onSyncFlush } from '~/lib/sync-engine';
 import * as queue from '~/lib/sync-queue';
 
 const isOnline = ref(true);
@@ -25,6 +25,13 @@ export function useOfflineSync() {
     });
 
     initSyncEngine();
+
+    // When the sync engine finishes flushing the queue, refresh the pending
+    // count so the SyncStatus UI updates from "Sincronizare (N)" to "Sincronizat".
+    onSyncFlush(() => {
+      void refreshPendingCount();
+    });
+
     void refreshPendingCount();
   }
 

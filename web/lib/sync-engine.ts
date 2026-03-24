@@ -5,6 +5,18 @@ import { api } from './api';
 let syncing = false;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Callback to notify the composable that pending count may have changed.
+// Set by useOfflineSync when it initializes the engine.
+let onSyncComplete: (() => void) | null = null;
+
+/**
+ * Register a callback that fires after the sync queue is flushed.
+ * The useOfflineSync composable uses this to refresh the pending mutation count.
+ */
+export function onSyncFlush(callback: () => void): void {
+  onSyncComplete = callback;
+}
+
 const BASE_DELAY = 1000;
 const MAX_DELAY = 30000;
 
@@ -116,6 +128,9 @@ async function flushQueue(): Promise<void> {
     if (response.server_timestamp !== '') {
       await db.syncMeta.put({ key: 'lastSyncAt', value: response.server_timestamp });
     }
+
+    // Notify the composable so the SyncStatus UI updates.
+    if (onSyncComplete !== null) onSyncComplete();
   } catch (error) {
     // Network error — mark all back as pending with exponential backoff
     const pending = await queue.getPending();
