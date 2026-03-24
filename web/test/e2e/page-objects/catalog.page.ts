@@ -157,7 +157,21 @@ export class CatalogPage {
    * @param classId - The UUID of the class to open, e.g. '018e4c3d-...'
    */
   async goto(classId: string): Promise<void> {
-    await this.page.goto(`/catalog/${classId}`);
+    // Use client-side (SPA) navigation instead of page.goto() to preserve
+    // the auth tokens in localStorage. A full page.goto() triggers SSR where
+    // localStorage is unavailable, causing the auth check to redirect to /login.
+    //
+    // We inject a temporary <a> element with the target href, click it (which
+    // triggers Vue Router's client-side navigation), then remove the element.
+    await this.page.evaluate((id: string) => {
+      const link = document.createElement('a');
+      link.href = `/catalog/${id}`;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }, classId);
+    await this.page.waitForURL(`**/catalog/${classId}`, { timeout: 15_000 });
   }
 
   /**

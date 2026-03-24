@@ -232,7 +232,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- ADMIN DASHBOARD                                                    -->
   <!-- Quick-access cards for school administration features.             -->
   <!-- ================================================================== -->
-  <div v-else-if="user?.role === 'admin'" class="space-y-6">
+  <div data-testid="dashboard-content" v-else-if="user?.role === 'admin'" class="space-y-6">
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Administrare școală</h1>
       <p class="mt-1 text-sm text-gray-500">Gestionați utilizatori, clase și configurări</p>
@@ -274,7 +274,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <!-- PARENT DASHBOARD (placeholder for future implementation)           -->
   <!-- ================================================================== -->
-  <div v-else-if="user?.role === 'parent'" class="space-y-6">
+  <div data-testid="dashboard-content" v-else-if="user?.role === 'parent'" class="space-y-6">
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Copiii mei</h1>
       <p class="mt-1 text-sm text-gray-500">Vizualizați situația școlară a copiilor</p>
