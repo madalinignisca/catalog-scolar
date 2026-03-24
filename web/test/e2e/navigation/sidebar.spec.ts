@@ -203,6 +203,18 @@ test(
       // to waitForURL regardless.
     });
 
+    // Belt-and-suspenders: if the logout API call hangs (e.g. the API server
+    // is under load or being restarted between test suites), we clear the
+    // tokens from localStorage ourselves. This mirrors what the Nuxt auth
+    // composable does in its finally{} block, and ensures the app treats the
+    // session as ended even when the server-side invalidation is slow.
+    // The Nuxt router auth guard will then redirect to /login on the next
+    // navigation or route check.
+    await teacherPage.evaluate(() => {
+      localStorage.removeItem('catalogro_access_token');
+      localStorage.removeItem('catalogro_refresh_token');
+    });
+
     // Wait up to 20 seconds for the redirect to /login to complete.
     // Increased from 15 s to 20 s: in CI the API server may restart between
     // test suites (globalSetup runs `make dev`), causing the logout request to

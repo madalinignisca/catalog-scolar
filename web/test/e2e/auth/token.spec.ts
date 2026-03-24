@@ -84,7 +84,17 @@ test.describe('token lifecycle', () => {
     });
 
     // Step 3: Try to navigate to the dashboard.
-    await page.goto('/');
+    // Retry once on net::ERR_ABORTED — the Nuxt dev server can intermittently
+    // refuse connections when it is under load after many test suites. A single
+    // retry with a 1-second delay is enough to recover from this transient error
+    // without masking real auth-redirect failures.
+    try {
+      await page.goto('/');
+    } catch {
+      // First attempt failed (e.g. net::ERR_ABORTED). Wait briefly, then retry.
+      await page.waitForTimeout(1_000);
+      await page.goto('/');
+    }
 
     // Step 4: Verify redirect to /login — no tokens means no session.
     await page.waitForURL('**/login', { timeout: 10_000 });

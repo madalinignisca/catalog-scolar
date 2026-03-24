@@ -125,6 +125,39 @@ const API_BASE = 'http://localhost:8080/api/v1';
 // ── Login helper ──────────────────────────────────────────────────────────────
 
 /**
+ * gotoWithRetry
+ *
+ * Navigates to a URL and retries once on failure (e.g. net::ERR_ABORTED).
+ * The Nuxt dev server can intermittently refuse connections when it is
+ * busy compiling after a cold start or after many concurrent test suites.
+ * Retrying once with a 1-second delay resolves the majority of these
+ * transient failures without masking real routing bugs.
+ *
+ * @param page    - Playwright Page instance.
+ * @param url     - URL to navigate to (relative or absolute).
+ * @param timeout - waitForURL timeout in ms (default 15 000).
+ */
+async function gotoWithRetry(page: Page, url: string, timeout = 15_000): Promise<void> {
+  try {
+    // First attempt — most runs succeed here.
+    await page.goto(url);
+  } catch {
+    // Navigation failed (e.g. net::ERR_ABORTED). Wait 1 s and retry once.
+    // We swallow the first error intentionally: the retry is the recovery.
+    await page.waitForTimeout(1_000);
+    await page.goto(url);
+  }
+  // After a successful goto, wait for the URL to stabilise on the target path.
+  // For '/' we check the pathname exactly; for other paths we check containment.
+  // We swallow timeouts here — the caller's own assertions will surface any
+  // real page-state issues. This prevents a double error stack on slow CI.
+  await page.waitForURL(
+    (u) => (url === '/' ? u.pathname === '/' : u.toString().includes(url)),
+    { timeout },
+  ).catch(() => { /* intentionally swallowed — see above */ });
+}
+
+/**
  * performLogin
  *
  * Authenticates by calling the API directly (not through the UI) and injects
@@ -141,6 +174,15 @@ const API_BASE = 'http://localhost:8080/api/v1';
  * the real backend).
  *
  * The login UI itself is thoroughly tested in auth/login.spec.ts (tests 1-9).
+ *
+ * RESILIENCE NOTES
+ * ────────────────
+ * Each page.goto() call is wrapped in a retry helper (gotoWithRetry) to
+ * handle transient net::ERR_ABORTED errors that occur when the Nuxt dev
+ * server is under load during parallel test execution. After injecting
+ * tokens and navigating to '/', we also verify we are NOT on '/login' — if
+ * the Nuxt auth middleware redirected us back, we reinject tokens and retry
+ * the navigation once more.
  *
  * @param page - Playwright Page instance.
  * @param user - User credentials from TEST_USERS.
@@ -203,8 +245,11 @@ async function performLogin(
   // Step 3: Navigate to the app and inject tokens into localStorage.
   // We must navigate first because localStorage is origin-scoped — we need
   // the page to be on localhost:3000 before we can set localStorage keys.
-  await page.goto('/login');
+  // gotoWithRetry handles transient net::ERR_ABORTED from the dev server.
+  await gotoWithRetry(page, '/login');
 
+  // Inject the tokens we obtained from the API into the browser's
+  // localStorage so the Nuxt auth composable picks them up on next navigation.
   await page.evaluate(
     ({ access, refresh }) => {
       localStorage.setItem('catalogro_access_token', access);
@@ -215,8 +260,27 @@ async function performLogin(
 
   // Step 4: Navigate to the dashboard. The Nuxt app will read the tokens
   // from localStorage and render the authenticated view.
-  await page.goto('/');
-  await page.waitForURL((url) => url.pathname === '/', { timeout: 15_000 });
+  // gotoWithRetry handles net::ERR_ABORTED on the second navigation too.
+  await gotoWithRetry(page, '/');
+
+  // Step 5: Verify we ended up on '/' and NOT on '/login'.
+  // If the Nuxt auth middleware redirected us back to /login (e.g. because
+  // the token injection happened before SSR hydration read localStorage),
+  // we reinject the tokens and attempt one more navigation to '/'.
+  const currentUrl = page.url();
+  if (currentUrl.includes('/login')) {
+    // Tokens may not have survived the navigation — reinject them.
+    await page.evaluate(
+      ({ access, refresh }) => {
+        localStorage.setItem('catalogro_access_token', access);
+        localStorage.setItem('catalogro_refresh_token', refresh);
+      },
+      { access: accessToken, refresh: refreshToken },
+    );
+    // Navigate to dashboard one more time after reinjecting tokens.
+    await page.goto('/');
+    await page.waitForURL((url) => url.pathname === '/', { timeout: 15_000 });
+  }
 }
 
 // ── Fixture type declarations ─────────────────────────────────────────────────

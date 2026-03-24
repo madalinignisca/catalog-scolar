@@ -152,6 +152,14 @@ authTest(
     const modal = new GradeInputModal(teacherPage);
 
     // ── Navigate and wait for the grid to load normally ───────────────────────
+    // CatalogPage.goto() waits for dashboard-content and then clicks the class
+    // card. We must ensure the dashboard has fully loaded before calling goto()
+    // so the class card is interactable. We explicitly wait for dashboard-content
+    // here because teacherPage may still be in the initial loading state if this
+    // test runs right after the fixture setup.
+    await teacherPage.waitForURL('/', { timeout: 15_000 });
+    await teacherPage.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 15_000 });
+
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
