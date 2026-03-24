@@ -309,7 +309,9 @@ test(
     // The delete flow uses window.confirm() which creates a browser dialog.
     // We must register the handler BEFORE the click that triggers it,
     // otherwise the dialog fires and auto-dismisses before we can accept it.
-    teacherPage.on('dialog', (dialog) => void dialog.accept());
+    // Use once() so the handler fires for the delete confirmation only,
+    // not for dialogs in other tests that share the same page context.
+    teacherPage.once('dialog', (dialog) => void dialog.accept());
 
     // ── Try Pattern A: hover → delete icon on badge ───────────────────────────
     const gradeBadge = targetRow.getByTestId('grade-badge').first();
