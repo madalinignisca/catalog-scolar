@@ -380,10 +380,9 @@ test(
     await expect(catalogPage.studentRows.first()).toBeVisible({ timeout: 8_000 });
 
     // ── PART A: Empty form submission ─────────────────────────────────────────
-    // Open the add-grade modal for Ioana Crișan (has seed grade B, row is
-    // visible in the grid). We target her because Mureșan has no grades and
-    // therefore her row is not rendered by the API.
-    await catalogPage.clickAddGrade('Crișan');
+    // Open the add-grade modal for Andrei Moldovan (always has grades in the
+    // grid). Crișan may have lost all grades from test 54's delete operation.
+    await catalogPage.clickAddGrade('Moldovan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
     // Click save without selecting a qualifier or entering a date.
