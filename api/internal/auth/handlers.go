@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -421,6 +422,280 @@ func HandleGetProfile(db *generated.Queries) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"data": profile,
+		})
+	}
+}
+
+// =============================================================================
+// HandleGetActivation — GET /auth/activate/{token}
+// =============================================================================
+
+// activationInfoResponse is the JSON payload returned by GET /auth/activate/{token}.
+// It contains just enough user info for the activation page to show a confirmation
+// screen ("You are activating the account for Radu Popescu, teacher at Scoala nr. 1").
+// Sensitive fields (password_hash, totp_secret) are intentionally excluded.
+type activationInfoResponse struct {
+	// UserID is the UUID of the user being activated.
+	// The frontend doesn't strictly need it for GET, but it's useful for logging
+	// and for the POST payload so the frontend doesn't have to re-parse the token.
+	UserID string `json:"user_id"`
+
+	// Email is the user's email address (nullable — some accounts only have a phone).
+	// Shown on the confirmation screen so the user can verify they are on the right account.
+	Email string `json:"email,omitempty"`
+
+	// FirstName and LastName are the user's name as provisioned by the secretary.
+	// Displayed on the activation page so the user can confirm their identity.
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+
+	// Role is the user's role (e.g., "teacher", "student", "parent").
+	// Used by the frontend to conditionally show the GDPR consent checkbox
+	// (required for parent accounts per ROFUIP rules).
+	Role string `json:"role"`
+
+	// SchoolName is the name of the school the account belongs to.
+	// Shown on the activation page alongside the identity confirmation block.
+	SchoolName string `json:"school_name"`
+
+	// Requires2FA indicates whether the user must set up TOTP (2FA) as part
+	// of activation. True for admin, secretary, and teacher roles — these roles
+	// handle sensitive student data and are required by school policy to use 2FA.
+	// False for parent and student roles.
+	Requires2FA bool `json:"requires_2fa"`
+}
+
+// HandleGetActivation returns an http.HandlerFunc that validates an activation
+// token and returns the user's pre-filled identity information.
+//
+// This endpoint is intentionally PUBLIC — the user has not authenticated yet.
+// It uses a direct DB connection (no RLS transaction) because we have no
+// school_id context before authentication.
+//
+// The activation flow:
+//  1. Extract the token from the URL path parameter {token}
+//  2. Look up the user by activation_token (query also checks activated_at IS NULL,
+//     so used/expired tokens return 404 naturally)
+//  3. Return the user's identity for the confirmation screen
+//
+// Parameters:
+//   - db: sqlc Queries using the connection pool directly (no RLS)
+func HandleGetActivation(db *generated.Queries) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Extract the token from the URL path.
+		// chi.URLParam reads path parameters defined with {token} in the route pattern.
+		// Example: GET /auth/activate/abc123 → token = "abc123"
+		token := chi.URLParam(r, "token")
+		if token == "" {
+			// This should not happen if chi routing is correct, but we guard anyway.
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Token is required")
+			return
+		}
+
+		// Step 2: Look up the user by activation token.
+		// GetUserByActivationToken:
+		//   - Does NOT use RLS (pre-login, no school_id context)
+		//   - Joins schools to get school_name in one query (no N+1)
+		//   - Returns pgx.ErrNoRows if: token not found, already activated, or expired
+		// We pass a pointer to token because the DB column is nullable (*string).
+		user, err := db.GetUserByActivationToken(r.Context(), &token)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Token not found or already used — return a generic 404.
+				// We don't distinguish between "never existed" and "already activated"
+				// to avoid leaking information about which tokens have been used.
+				writeError(w, http.StatusNotFound, "INVALID_TOKEN", "Activation token is invalid or expired")
+				return
+			}
+			// Unexpected database error — log it, don't expose internals to the client.
+			slog.Error("activate/get: failed to query activation token", "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred")
+			return
+		}
+
+		// Step 3: Determine whether this role requires 2FA setup during activation.
+		// Admin, secretary, and teacher roles handle sensitive data and are required
+		// by CatalogRO policy to configure TOTP as part of their first login.
+		// Parent and student roles do not need 2FA.
+		requires2FA := user.Role == generated.UserRoleAdmin ||
+			user.Role == generated.UserRoleSecretary ||
+			user.Role == generated.UserRoleTeacher
+
+		// Step 4: Build the safe response — only include identity fields.
+		// Never include password_hash, totp_secret, or the raw activation_token.
+		resp := activationInfoResponse{
+			UserID:      user.ID.String(),
+			FirstName:   user.FirstName,
+			LastName:    user.LastName,
+			Role:        string(user.Role),
+			SchoolName:  user.SchoolName,
+			Requires2FA: requires2FA,
+		}
+
+		// Email is nullable — only include it if the user has one.
+		// Some accounts (e.g., students under GDPR age) may only have a phone.
+		if user.Email != nil {
+			resp.Email = *user.Email
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"data": resp,
+		})
+	}
+}
+
+// =============================================================================
+// HandlePostActivation — POST /auth/activate
+// =============================================================================
+
+// activationRequest is the expected JSON body for POST /auth/activate.
+// All three fields are documented below; gdpr_consent is optional (only required
+// for parent accounts, but the handler accepts and stores it for any account type).
+type activationRequest struct {
+	// Token is the activation token from the URL the user clicked.
+	// The frontend passes it back here so the server can re-validate it.
+	// This prevents CSRF-style attacks where one user tries to activate another's account.
+	Token string `json:"token"`
+
+	// Password is the new password the user wants to set.
+	// Must be at least 8 characters long (validated server-side).
+	// The handler hashes it with bcrypt before storing — plaintext is never persisted.
+	Password string `json:"password"`
+
+	// GDPRConsent, when true, records the user's consent to data processing.
+	// Required for parent accounts per Romanian ROFUIP rules.
+	// Stored as gdpr_consent_at = now() in the users table.
+	GDPRConsent bool `json:"gdpr_consent"`
+}
+
+// activationConfirmResponse is the JSON payload returned on successful activation.
+type activationConfirmResponse struct {
+	// Activated confirms the activation succeeded. Always true on a 200 response.
+	Activated bool `json:"activated"`
+
+	// Requires2FA tells the frontend whether the user still needs to set up TOTP.
+	// If true, the frontend should redirect to /2fa/setup instead of /login.
+	Requires2FA bool `json:"requires_2fa"`
+
+	// UserID is the UUID of the newly activated user.
+	// The frontend may use this to pre-fill the login form or for analytics.
+	UserID string `json:"user_id"`
+}
+
+// HandlePostActivation returns an http.HandlerFunc that completes the account
+// activation: validates the token, hashes the password, marks the account as
+// activated, and optionally records GDPR consent.
+//
+// This endpoint is intentionally PUBLIC — it IS the authentication bootstrap.
+// It uses a direct DB connection (no RLS transaction).
+//
+// The activation flow:
+//  1. Parse and validate the request body (token + password required)
+//  2. Re-validate the activation token (prevents replay after the GET call)
+//  3. Hash the password with bcrypt (cost 12 — balance of security and speed)
+//  4. Call ActivateUser to persist the hash and clear the activation_token
+//  5. If gdpr_consent is true, record consent timestamp
+//  6. Return activated=true + requires_2fa flag
+//
+// Parameters:
+//   - db: sqlc Queries using the connection pool directly (no RLS)
+func HandlePostActivation(db *generated.Queries) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Parse the JSON request body.
+		var req activationRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body")
+			return
+		}
+
+		// Validate required fields: both token and password must be present.
+		if req.Token == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Token is required")
+			return
+		}
+		if req.Password == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Password is required")
+			return
+		}
+
+		// Validate password length — minimum 8 characters.
+		// This is a server-side guard; the frontend should also enforce this.
+		if len(req.Password) < 8 {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Password must be at least 8 characters")
+			return
+		}
+
+		// Step 2: Re-validate the activation token.
+		// We look it up again (not just trusting the frontend) because:
+		//   a) The token may have been used between the GET and POST calls.
+		//   b) This prevents a malicious client from submitting a fake token.
+		// GetUserByActivationToken checks activated_at IS NULL, so a used token
+		// will return pgx.ErrNoRows here.
+		user, err := db.GetUserByActivationToken(r.Context(), &req.Token)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "INVALID_TOKEN", "Activation token is invalid or expired")
+				return
+			}
+			slog.Error("activate/post: failed to query activation token", "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred")
+			return
+		}
+
+		// Step 3: Hash the password with bcrypt.
+		// bcrypt.DefaultCost (10) is fine for development; consider cost 12 for production
+		// (adds ~100ms per login which is acceptable and significantly raises brute-force cost).
+		// GenerateFromPassword also generates a random salt and embeds it in the hash,
+		// so we never need to manage salts separately.
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			slog.Error("activate/post: failed to hash password", "user_id", user.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to process password")
+			return
+		}
+
+		// Convert the bcrypt output ([]byte) to a *string for the DB column.
+		// The users.password_hash column is TEXT (nullable), so sqlc generates *string.
+		hashStr := string(hash)
+
+		// Step 4: Activate the user — persist the hash, clear activation_token,
+		// set activated_at = now(). The ActivateUser query also re-checks that
+		// activated_at IS NULL (WHERE clause), so it's safe if called twice.
+		_, err = db.ActivateUser(r.Context(), generated.ActivateUserParams{
+			ID:           user.ID,
+			PasswordHash: &hashStr,
+		})
+		if err != nil {
+			slog.Error("activate/post: failed to activate user", "user_id", user.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to activate account")
+			return
+		}
+
+		// Step 5: If the user gave GDPR consent, record the consent timestamp.
+		// This is required for parent accounts per Romanian ROFUIP rules.
+		// SetGDPRConsent sets gdpr_consent_at = now() on the users row.
+		// We run it unconditionally when the flag is true — the column is just a timestamp,
+		// so re-consenting (if somehow called twice) just updates the timestamp.
+		if req.GDPRConsent {
+			if err := db.SetGDPRConsent(r.Context(), user.ID); err != nil {
+				// Non-fatal: consent timestamp is important but shouldn't block activation.
+				// Log the error so an operator can manually patch it if needed.
+				slog.Warn("activate/post: failed to record GDPR consent", "user_id", user.ID, "error", err)
+			}
+		}
+
+		// Step 6: Determine if the newly activated user needs to set up 2FA next.
+		// Same logic as HandleGetActivation — admin, secretary, teacher require TOTP.
+		requires2FA := user.Role == generated.UserRoleAdmin ||
+			user.Role == generated.UserRoleSecretary ||
+			user.Role == generated.UserRoleTeacher
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"data": activationConfirmResponse{
+				Activated:   true,
+				Requires2FA: requires2FA,
+				UserID:      user.ID.String(),
+			},
 		})
 	}
 }

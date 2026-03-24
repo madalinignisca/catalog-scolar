@@ -205,11 +205,13 @@ func run() error {
 			// POST /auth/logout — clear the session (client discards tokens).
 			r.Post("/auth/logout", auth.HandleLogout())
 
-			// Activation endpoints — not yet implemented.
-			// These handle the flow where a provisioned user clicks their activation
-			// link, sets their password, and optionally configures 2FA.
-			r.Get("/auth/activate/{token}", notImplemented)
-			r.Post("/auth/activate", notImplemented)
+			// Activation endpoints — pre-login flow, no JWT required.
+			// GET  validates the token and returns the user's identity for the
+			//      confirmation screen (name, role, school).
+			// POST sets the password (and optional GDPR consent) and activates
+			//      the account. Both use a direct DB connection (no RLS).
+			r.Get("/auth/activate/{token}", auth.HandleGetActivation(queries))
+			r.Post("/auth/activate", auth.HandlePostActivation(queries))
 		})
 
 		// =====================================================================
