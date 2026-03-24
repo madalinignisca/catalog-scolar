@@ -115,72 +115,13 @@ export default defineConfig({
 
   // ── Browser projects ──────────────────────────────────────────────────────
   /**
-   * projects: ordered groups that enforce a dependency chain so tests run in
-   * a predictable, safe sequence.
-   *
-   * WHY ORDERED PROJECTS?
-   * ─────────────────────
-   * The test suite mutates shared database state (grades, absences, students).
-   * Running tests in the wrong order causes false failures — e.g. a write test
-   * might run before the auth token it depends on has been provisioned, or a
-   * read test might see stale data from a write that hasn't happened yet.
-   *
-   * Playwright's `dependencies` field guarantees that a project only starts
-   * after all its listed dependencies have completed successfully.
-   *
-   * EXECUTION ORDER
-   * ───────────────
-   *   auth → read-tests → write-tests → integration-tests
-   *
-   *   auth              Login flows, token refresh, 2FA. No prior state assumed.
-   *   read-tests        Dashboard, navigation, catalog views. Auth must succeed first.
-   *   write-tests       Grade CRUD, edge cases. The catalog must be readable first.
-   *   integration-tests Sync, error handling, edge cases. All writes must complete first.
-   *
-   * All projects target Desktop Chrome only — Firefox/WebKit can be added later.
+   * projects: each entry runs the entire test suite in a different browser.
+   * We only run Chromium to keep CI fast and the setup minimal.
+   * Firefox / WebKit can be added later if cross-browser coverage is needed.
    */
   projects: [
     {
-      // ── auth ──────────────────────────────────────────────────────────────
-      // Login, logout, token refresh, and 2FA tests.
-      // These run first because every other project needs a working auth flow.
-      name: 'auth',
-      testMatch: ['**/auth/**'],
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      // ── read-tests ────────────────────────────────────────────────────────
-      // Dashboard rendering, navigation flows, catalog page structure, and
-      // the grade grid display — all read-only, no data mutations.
-      // Depends on 'auth' so the session is valid when these tests run.
-      name: 'read-tests',
-      testMatch: [
-        '**/dashboard/**',
-        '**/navigation/**',
-        '**/catalog/navigation*',
-        '**/catalog/grade-grid*',
-      ],
-      dependencies: ['auth'],
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      // ── write-tests ───────────────────────────────────────────────────────
-      // Grade creation, editing, deletion (CRUD), and grade edge cases.
-      // Must run after read-tests so the catalog is confirmed to load correctly
-      // before we start mutating grades.
-      name: 'write-tests',
-      testMatch: ['**/catalog/grade-crud*', '**/catalog/grade-edge*'],
-      dependencies: ['read-tests'],
-      use: { ...devices['Desktop Chrome'] },
-    },
-    {
-      // ── integration-tests ─────────────────────────────────────────────────
-      // Offline sync, API error handling, and cross-cutting edge cases.
-      // These run last because they may leave the database in an unusual state
-      // (e.g. sync conflicts, partial writes) that would confuse earlier tests.
-      name: 'integration-tests',
-      testMatch: ['**/sync/**', '**/error/**', '**/edge/**'],
-      dependencies: ['write-tests'],
+      name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
   ],
