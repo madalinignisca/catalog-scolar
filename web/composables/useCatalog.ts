@@ -153,30 +153,40 @@ export interface UpdateGradePayload {
 
 // ── API Response Types ─────────────────────────────────────────────────────
 
-/** Response envelope for GET /classes */
-interface ClassesResponse {
-  data: TeacherClass[];
-}
+/** Response type for GET /classes (api() auto-unwraps the { data: ... } envelope) */
+type ClassesResponse = TeacherClass[];
 
-/** Response envelope for class teachers (GET /classes/{classId}/teachers) */
-interface ClassTeachersResponse {
-  data: Array<{
-    teacherId: string;
-    subjects: TeacherSubject[];
+/**
+ * Response type for class teachers (GET /classes/{classId}/teachers).
+ * The API returns a FLAT list of teacher-subject assignments (one row per
+ * teacher-subject pair), not grouped by teacher. After snakeToCamel conversion:
+ *   { teacherId, firstName, lastName, subjectId, subjectName, hoursPerWeek }
+ */
+type ClassTeachersResponse = Array<{
+  teacherId: string;
+  firstName: string;
+  lastName: string;
+  subjectId: string;
+  subjectName: string;
+  hoursPerWeek: number;
+}>;
+
+/**
+ * Response type for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades).
+ * The API returns a nested structure where each entry has a `student` object
+ * and a `grades` array. After snakeToCamel conversion:
+ *   { students: [{ student: { id, firstName, lastName }, grades: [...] }] }
+ * We flatten this in fetchClassGrades() to match StudentWithGrades.
+ */
+interface GradesResponse {
+  students: Array<{
+    student: { id: string; firstName: string; lastName: string };
+    grades: Grade[];
   }>;
 }
 
-/** Response envelope for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades) */
-interface GradesResponse {
-  data: {
-    students: StudentWithGrades[];
-  };
-}
-
-/** Response envelope for single grade operations (POST/PUT) */
-interface GradeResponse {
-  data: Grade;
-}
+/** Response type for single grade operations (POST/PUT) */
+type GradeResponse = Grade;
 
 // ── Composable ─────────────────────────────────────────────────────────────
 
@@ -218,7 +228,7 @@ export function useCatalog() {
 
     try {
       const response = await api<ClassesResponse>('/classes');
-      classes.value = response.data;
+      classes.value = response;
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca clasele';
       classes.value = [];
@@ -242,11 +252,17 @@ export function useCatalog() {
     try {
       const response = await api<ClassTeachersResponse>(`/classes/${classId}/teachers`);
 
-      /* Find the current teacher in the list of teachers for this class.
-       * The API returns all teachers for the class, so we filter by ID. */
-      const myAssignment = response.data.find((t) => t.teacherId === currentUserId);
+      /* The API returns a flat list of teacher-subject assignments:
+       *   [{ teacherId, subjectId, subjectName, ... }, ...]
+       * Filter to the current teacher, then map each row to a TeacherSubject. */
+      const myAssignments = response.filter((t) => t.teacherId === currentUserId);
 
-      return myAssignment?.subjects ?? [];
+      return myAssignments.map((a) => ({
+        id: a.subjectId,
+        name: a.subjectName,
+        shortName: null,
+        hasThesis: false,
+      }));
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca materiile';
       return [];
@@ -274,7 +290,18 @@ export function useCatalog() {
       const response = await api<GradesResponse>(
         `/catalog/classes/${classId}/subjects/${subjectId}/grades?semester=${semester}`,
       );
-      gradeGrid.value = response.data.students;
+
+      // Flatten the nested API response into the StudentWithGrades format.
+      // API returns: { student: { id, firstName, lastName }, grades: [...] }
+      // We need:    { studentId, firstName, lastName, grades: [...], average, qualifierFinal }
+      gradeGrid.value = response.students.map((entry) => ({
+        studentId: entry.student.id,
+        firstName: entry.student.firstName,
+        lastName: entry.student.lastName,
+        grades: entry.grades,
+        average: computeNumericAverage(entry.grades),
+        qualifierFinal: null,
+      }));
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca notele';
       gradeGrid.value = [];
@@ -332,7 +359,7 @@ export function useCatalog() {
         /* Also enqueue for sync safety — the server deduplicates by client_id */
         await enqueueMutation('grade', 'create', body);
 
-        return response.data;
+        return response;
       } else {
         /* Offline path: enqueue the mutation for later sync */
         await enqueueMutation('grade', 'create', body);
@@ -393,7 +420,7 @@ export function useCatalog() {
           grade_id: gradeId,
         });
 
-        return response.data;
+        return response;
       } else {
         /* Offline: enqueue for later */
         await enqueueMutation('grade', 'update', {

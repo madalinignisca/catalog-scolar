@@ -20,11 +20,9 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: api/go.sum
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
       - name: Generate sqlc code
         working-directory: api
-        run: sqlc generate
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc generate
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
@@ -63,15 +61,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: api/go.sum
-      - name: Install tools
-        run: |
-          go install github.com/pressly/goose/v3/cmd/goose@latest
-          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
       - name: Generate sqlc code
         working-directory: api
-        run: sqlc generate
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc generate
       - name: Run migrations
-        run: goose -dir api/db/migrations postgres "postgres://catalogro:catalogro@localhost:5432/catalogro_test?sslmode=disable" up
+        working-directory: api
+        run: go run github.com/pressly/goose/v3/cmd/goose -dir db/migrations postgres "postgres://catalogro:catalogro@localhost:5432/catalogro_test?sslmode=disable" up
       - name: Run tests
         working-directory: api
         env:
@@ -89,11 +84,9 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: api/go.sum
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
       - name: Generate sqlc code
         working-directory: api
-        run: sqlc generate
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc generate
       - name: Build binary
         working-directory: api
         run: CGO_ENABLED=0 go build -o ../bin/catalogro-api ./cmd/server

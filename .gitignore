@@ -38,4 +38,3 @@ miniodata/
 web/test/e2e/results/
 web/playwright-report/
 web/blob-report/
-test

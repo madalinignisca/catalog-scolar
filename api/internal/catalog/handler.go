@@ -116,6 +116,14 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse and validate URL path parameters.
 	classID, err := uuid.Parse(chi.URLParam(r, "classId"))
 	if err != nil {
@@ -149,7 +157,7 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		// No school_year_id provided — use the current school year.
-		sy, err := h.queries.GetCurrentSchoolYear(r.Context())
+		sy, err := queries.GetCurrentSchoolYear(r.Context())
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
@@ -165,7 +173,7 @@ func (h *Handler) ListGrades(w http.ResponseWriter, r *http.Request) {
 	// Step 5: Fetch grades from the database.
 	// The ListGradesByClassSubject query joins grades with users to get student names.
 	// Results are sorted by student last name, then first name, then grade date.
-	rows, err := h.queries.ListGradesByClassSubject(r.Context(), generated.ListGradesByClassSubjectParams{
+	rows, err := queries.ListGradesByClassSubject(r.Context(), generated.ListGradesByClassSubjectParams{
 		ClassID:      classID,
 		SubjectID:    subjectID,
 		Semester:     semester,
@@ -288,6 +296,14 @@ func (h *Handler) CreateGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the JSON request body.
 	var req createGradeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -363,7 +379,7 @@ func (h *Handler) CreateGrade(w http.ResponseWriter, r *http.Request) {
 	// Step 7: Authorization check — verify the teacher is assigned to this class+subject.
 	// Admins bypass this check because they may need to correct grades on behalf of teachers.
 	if role == "teacher" {
-		_, err := h.queries.CheckTeacherClassSubject(r.Context(), generated.CheckTeacherClassSubjectParams{
+		_, err := queries.CheckTeacherClassSubject(r.Context(), generated.CheckTeacherClassSubjectParams{
 			TeacherID: userID,
 			ClassID:   req.ClassID,
 			SubjectID: req.SubjectID,
@@ -380,7 +396,7 @@ func (h *Handler) CreateGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 8: Get the current school year for the grade record.
-	schoolYear, err := h.queries.GetCurrentSchoolYear(r.Context())
+	schoolYear, err := queries.GetCurrentSchoolYear(r.Context())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
@@ -407,7 +423,7 @@ func (h *Handler) CreateGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 10: Insert the grade into the database.
-	grade, err := h.queries.CreateGrade(r.Context(), generated.CreateGradeParams{
+	grade, err := queries.CreateGrade(r.Context(), generated.CreateGradeParams{
 		StudentID:       req.StudentID,
 		ClassID:         req.ClassID,
 		SubjectID:       req.SubjectID,
@@ -472,6 +488,14 @@ func (h *Handler) UpdateGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the grade ID from the URL.
 	gradeID, err := uuid.Parse(chi.URLParam(r, "gradeId"))
 	if err != nil {
@@ -487,7 +511,7 @@ func (h *Handler) UpdateGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 4: Fetch the existing grade to verify it exists and check ownership.
-	existing, err := h.queries.GetGradeByID(r.Context(), gradeID)
+	existing, err := queries.GetGradeByID(r.Context(), gradeID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.NotFound(w, "Grade not found")
@@ -544,7 +568,7 @@ func (h *Handler) UpdateGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 8: Update the grade in the database.
-	updated, err := h.queries.UpdateGrade(r.Context(), generated.UpdateGradeParams{
+	updated, err := queries.UpdateGrade(r.Context(), generated.UpdateGradeParams{
 		ID:             gradeID,
 		NumericGrade:   req.NumericGrade,
 		QualifierGrade: qualifierGrade,
@@ -598,6 +622,14 @@ func (h *Handler) DeleteGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the grade ID from the URL.
 	gradeID, err := uuid.Parse(chi.URLParam(r, "gradeId"))
 	if err != nil {
@@ -606,7 +638,7 @@ func (h *Handler) DeleteGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 3: Fetch the existing grade to verify it exists and check ownership.
-	existing, err := h.queries.GetGradeByID(r.Context(), gradeID)
+	existing, err := queries.GetGradeByID(r.Context(), gradeID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.NotFound(w, "Grade not found")
@@ -624,7 +656,7 @@ func (h *Handler) DeleteGrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Soft delete the grade (sets deleted_at = now()).
-	if err := h.queries.SoftDeleteGrade(r.Context(), gradeID); err != nil {
+	if err := queries.SoftDeleteGrade(r.Context(), gradeID); err != nil {
 		h.logger.Error("failed to soft delete grade", "error", err, "grade_id", gradeID)
 		httputil.InternalError(w)
 		return

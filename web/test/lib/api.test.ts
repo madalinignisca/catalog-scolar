@@ -136,10 +136,11 @@ describe('api() — typed fetch wrapper', () => {
 
     /**
      * ASSERT
-     * The wrapper should return the parsed JSON body directly.
-     * We expect the `data` key from the envelope, and `id` within that.
+     * api() unwraps the { data: ... } envelope and returns the inner payload
+     * directly. So { data: { id: '1' } } from the server becomes just
+     * { id: '1' } after unwrapping (no snake_case keys to convert here).
      */
-    expect(response).toEqual({ data: { id: '1' } });
+    expect(response).toEqual({ id: '1' });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -271,8 +272,11 @@ describe('api() — typed fetch wrapper', () => {
 
     /**
      * ASSERT 1 — the eventual result is the user payload from the retry call.
+     * api() unwraps the { data: ... } envelope and applies snakeToCamel, so the
+     * result is the inner object directly (no snake_case keys in this payload,
+     * so no key changes occur here).
      */
-    expect(result).toEqual(userPayload);
+    expect(result).toEqual({ id: '1', name: 'Ion Popescu' });
 
     /**
      * ASSERT 2 — fetch was called exactly 3 times (original + refresh + retry).

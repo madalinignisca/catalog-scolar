@@ -113,9 +113,12 @@ watch(
  */
 const sortedStudents = computed<StudentWithGrades[]>(() => {
   return [...gradeGrid.value].sort((a, b) => {
-    const lastNameCompare = a.lastName.localeCompare(b.lastName, 'ro');
+    /* Use || '' to guard against missing names from partial API responses.
+     * The TypeScript type says these are non-optional, but the runtime API
+     * may omit them if a student record is incomplete. */
+    const lastNameCompare = (a.lastName || '').localeCompare(b.lastName || '', 'ro');
     if (lastNameCompare !== 0) return lastNameCompare;
-    return a.firstName.localeCompare(b.firstName, 'ro');
+    return (a.firstName || '').localeCompare(b.firstName || '', 'ro');
   });
 });
 
@@ -135,10 +138,13 @@ const usesQualifiers = computed(() => props.educationLevel === 'primary');
  * @returns A string representation of the grade value
  */
 function gradeDisplayValue(grade: Grade): string {
-  if (grade.numericGrade !== null) {
+  // Use != null (loose equality) to catch both null AND undefined.
+  // The API may omit numeric_grade entirely (undefined after snakeToCamel)
+  // rather than sending it as null.
+  if (grade.numericGrade != null) {
     return String(grade.numericGrade);
   }
-  if (grade.qualifierGrade !== null) {
+  if (grade.qualifierGrade != null) {
     return grade.qualifierGrade;
   }
   return '—';
@@ -190,10 +196,10 @@ function numericGradeColorClasses(grade: number): string {
  * @returns Tailwind CSS class string
  */
 function gradeBadgeClasses(grade: Grade): string {
-  if (grade.qualifierGrade !== null) {
+  if (grade.qualifierGrade != null) {
     return qualifierColorClasses(grade.qualifierGrade);
   }
-  if (grade.numericGrade !== null) {
+  if (grade.numericGrade != null) {
     return numericGradeColorClasses(grade.numericGrade);
   }
   return 'bg-gray-100 text-gray-800 border-gray-200';
@@ -207,12 +213,14 @@ function gradeBadgeClasses(grade: Grade): string {
  * @returns A tooltip string like "15.10.2026 — Test la capitolul 3"
  */
 function gradeTooltip(grade: Grade): string {
-  /* Format date from ISO (2026-10-15) to Romanian format (15.10.2026) */
-  const parts = grade.gradeDate.split('-');
+  /* Format date from ISO (2026-10-15) to Romanian format (15.10.2026).
+   * Use || '' to guard against missing gradeDate from partial API responses. */
+  const rawDate = grade.gradeDate || '';
+  const parts = rawDate.split('-');
   const day = parts[2] ?? '';
   const month = parts[1] ?? '';
   const year = parts[0] ?? '';
-  const formattedDate = parts.length === 3 ? `${day}.${month}.${year}` : grade.gradeDate;
+  const formattedDate = parts.length === 3 ? `${day}.${month}.${year}` : rawDate;
 
   if (grade.description !== null && grade.description !== '') {
     return `${formattedDate} — ${grade.description}`;
@@ -360,6 +368,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
   <div class="space-y-4">
     <!-- Error banner -->
     <div
+      data-testid="grade-grid-error"
       v-if="error !== null && error !== ''"
       class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
     >
@@ -367,12 +376,13 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
     </div>
 
     <!-- Loading skeleton for the grade table -->
-    <div v-if="isLoading" class="space-y-3">
+    <div data-testid="grade-grid-loading" v-if="isLoading" class="space-y-3">
       <div v-for="n in 5" :key="n" class="h-12 animate-pulse rounded-lg bg-gray-200" />
     </div>
 
     <!-- Empty state: no students in this class -->
     <div
+      data-testid="grade-grid-empty"
       v-else-if="sortedStudents.length === 0"
       class="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center"
     >
@@ -385,7 +395,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
     <!-- Responsive: horizontally scrollable on small screens.              -->
     <!-- ================================================================== -->
     <div v-else class="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-      <table class="min-w-full divide-y divide-gray-200">
+      <table data-testid="grade-grid" class="min-w-full divide-y divide-gray-200">
         <!-- Table header -->
         <thead class="bg-gray-50">
           <tr>
@@ -431,6 +441,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
         <!-- Table body: one row per student -->
         <tbody class="divide-y divide-gray-100">
           <tr
+            data-testid="student-row"
             v-for="(student, index) in sortedStudents"
             :key="student.studentId"
             class="transition-colors hover:bg-gray-50"
@@ -441,7 +452,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             </td>
 
             <!-- Student name -->
-            <td class="whitespace-nowrap px-4 py-3">
+            <td data-testid="student-name" class="whitespace-nowrap px-4 py-3">
               <span class="text-sm font-medium text-gray-900">
                 {{ student.lastName }}
               </span>
@@ -457,6 +468,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 <div v-for="grade in student.grades" :key="grade.id" class="group relative">
                   <!-- Grade badge button: click to edit this grade -->
                   <button
+                    data-testid="grade-badge"
                     type="button"
                     :title="gradeTooltip(grade)"
                     :disabled="deletingGradeId === grade.id"
@@ -475,6 +487,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
 
                   <!-- Delete button: appears on hover over the grade badge -->
                   <button
+                    data-testid="delete-grade-button"
                     type="button"
                     title="Șterge nota"
                     class="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white group-hover:flex"
@@ -497,7 +510,10 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 </div>
 
                 <!-- Empty state: no grades yet for this student -->
-                <span v-if="student.grades.length === 0" class="text-xs italic text-gray-400">
+                <span
+                  v-if="!student.grades || student.grades.length === 0"
+                  class="text-xs italic text-gray-400"
+                >
                   Nicio notă
                 </span>
               </div>
@@ -506,6 +522,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             <!-- Average column (only for numeric grades) -->
             <td v-if="!usesQualifiers" class="whitespace-nowrap px-4 py-3 text-center">
               <span
+                data-testid="student-average"
                 :class="[
                   'text-sm font-semibold',
                   student.average !== null && student.average < 5
@@ -522,6 +539,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
             <!-- Add grade button -->
             <td class="whitespace-nowrap px-3 py-3 text-center">
               <button
+                data-testid="add-grade-button"
                 type="button"
                 title="Adaugă notă"
                 class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-50 text-blue-600 transition-colors hover:bg-blue-100"

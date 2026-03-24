@@ -230,6 +230,7 @@ function handleClose(): void {
     <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <!-- Backdrop: semi-transparent overlay. Clicking it closes the modal. -->
       <button
+        data-testid="grade-modal-backdrop"
         type="button"
         aria-label="Închide"
         class="fixed inset-0 cursor-default border-none bg-black/50"
@@ -238,6 +239,7 @@ function handleClose(): void {
 
       <!-- Modal panel -->
       <div
+        data-testid="grade-modal"
         class="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
         role="dialog"
         aria-modal="true"
@@ -245,10 +247,10 @@ function handleClose(): void {
       >
         <!-- Modal header -->
         <div class="mb-5">
-          <h2 class="text-lg font-semibold text-gray-900">
+          <h2 data-testid="grade-modal-title" class="text-lg font-semibold text-gray-900">
             {{ modalTitle }}
           </h2>
-          <p class="mt-0.5 text-sm text-gray-500">
+          <p data-testid="grade-modal-student" class="mt-0.5 text-sm text-gray-500">
             {{ studentName }}
           </p>
         </div>
@@ -266,6 +268,7 @@ function handleClose(): void {
               <button
                 v-for="option in qualifierOptions"
                 :key="option.value"
+                :data-testid="'qualifier-' + option.value"
                 type="button"
                 :class="[
                   'rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-colors',
@@ -290,6 +293,7 @@ function handleClose(): void {
               Notă (1-10)
             </label>
             <input
+              data-testid="grade-numeric-input"
               id="grade-numeric"
               v-model.number="numericValue"
               type="number"
@@ -310,6 +314,7 @@ function handleClose(): void {
               Data
             </label>
             <input
+              data-testid="grade-date-input"
               id="grade-date"
               v-model="gradeDate"
               type="date"
@@ -329,6 +334,7 @@ function handleClose(): void {
               <span class="font-normal text-gray-400">(opțional)</span>
             </label>
             <input
+              data-testid="grade-description-input"
               id="grade-description"
               v-model="description"
               type="text"
@@ -338,7 +344,11 @@ function handleClose(): void {
           </div>
 
           <!-- Validation error message -->
-          <div v-if="validationError !== ''" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          <div
+            data-testid="grade-validation-error"
+            v-if="validationError !== ''"
+            class="rounded-lg bg-red-50 p-3 text-sm text-red-700"
+          >
             {{ validationError }}
           </div>
 
@@ -347,6 +357,7 @@ function handleClose(): void {
           <!-- ============================================================ -->
           <div class="flex items-center justify-end gap-3 pt-2">
             <button
+              data-testid="grade-cancel-button"
               type="button"
               class="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
               @click="handleClose"
@@ -354,6 +365,7 @@ function handleClose(): void {
               Anulează
             </button>
             <button
+              data-testid="grade-save-button"
               type="submit"
               class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700"
             >

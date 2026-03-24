@@ -7,11 +7,18 @@ const TOKEN_KEY = 'catalogro_access_token';
 const REFRESH_KEY = 'catalogro_refresh_token';
 
 function getApiBase(): string {
+  // Check for explicit override via env var first (works in both client and server).
   if (import.meta.client) {
-    return useRuntimeConfig().public.apiBase;
+    const configured = useRuntimeConfig().public.apiBase;
+    // If the configured base is the default localhost and we're accessing the app
+    // from a different host (e.g., VM IP on the LAN), use the current browser hostname
+    // so the API call goes to the same machine the page was loaded from.
+    if (configured === 'http://localhost:8080/api/v1' && window.location.hostname !== 'localhost') {
+      return `http://${window.location.hostname}:8080/api/v1`;
+    }
+    return configured;
   }
   // Server-side: process.env is available via Node but not typed by @types/node in this project.
-
   const envBase = (process as unknown as { env: Record<string, string | undefined> }).env[
     'NUXT_PUBLIC_API_BASE'
   ];
@@ -100,7 +107,45 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     );
   }
 
-  return response.json() as Promise<T>;
+  // The API wraps all success responses in { "data": ... }. Unwrap the envelope
+  // so callers get the inner payload directly (e.g., api<User>('/users/me')
+  // returns the User object, not { data: User }).
+  const body: unknown = await response.json();
+  let payload: unknown;
+  if (typeof body === 'object' && body !== null && 'data' in body) {
+    payload = (body as Record<string, unknown>)['data'];
+  } else {
+    payload = body;
+  }
+
+  // Convert snake_case keys from the Go API to camelCase used by TypeScript
+  // interfaces throughout the frontend. This is done recursively so nested
+  // objects (e.g., homeroom_teacher inside a class) are also converted.
+  return snakeToCamel(payload) as T;
+}
+
+/**
+ * Recursively converts snake_case object keys to camelCase.
+ * Handles arrays, nested objects, and primitive values.
+ *
+ * Examples:
+ *   { first_name: "Ana" }         → { firstName: "Ana" }
+ *   { school_id: "abc" }          → { schoolId: "abc" }
+ *   [{ grade_date: "2026-01-01" }] → [{ gradeDate: "2026-01-01" }]
+ */
+function snakeToCamel(data: unknown): unknown {
+  if (Array.isArray(data)) {
+    return data.map(snakeToCamel);
+  }
+  if (data !== null && typeof data === 'object' && !(data instanceof Date)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      const camelKey = key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+      result[camelKey] = snakeToCamel(value);
+    }
+    return result;
+  }
+  return data;
 }
 
 async function tryRefreshToken(): Promise<boolean> {
@@ -118,7 +163,13 @@ async function tryRefreshToken(): Promise<boolean> {
 
     if (!response.ok) return false;
 
-    const data = (await response.json()) as RefreshResponse;
+    // Unwrap the { data: ... } envelope, same as the main api() function
+    const body: unknown = await response.json();
+    const inner =
+      typeof body === 'object' && body !== null && 'data' in body
+        ? (body as Record<string, unknown>)['data']
+        : body;
+    const data = inner as RefreshResponse;
     setTokens(data.access_token, data.refresh_token);
     return true;
   } catch {

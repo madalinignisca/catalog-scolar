@@ -126,6 +126,7 @@ async function handleMfa() {
         <button
           type="submit"
           :disabled="loading"
+          data-testid="mfa-submit-button"
           class="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
         >
           {{ loading ? 'Se verifică...' : 'Verificare' }}

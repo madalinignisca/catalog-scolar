@@ -92,6 +92,14 @@ export class LoginPage {
   readonly loginError: Locator;
 
   /**
+   * The "Verificare" submit button on the MFA form.
+   * This is a DIFFERENT button from submitButton — the login page has two forms
+   * (v-if="!mfaRequired" for login, v-else for MFA) each with its own submit.
+   * Maps to: <button data-testid="mfa-submit-button" type="submit" ...>
+   */
+  readonly mfaSubmitButton: Locator;
+
+  /**
    * The error message div shown when MFA verification fails (wrong code, expired, etc.).
    * Maps to: <div data-testid="mfa-error" ...>
    * NOTE: Both login-error and mfa-error share the same `error` ref in the Vue component
@@ -115,6 +123,7 @@ export class LoginPage {
     this.passwordInput = page.getByTestId('password-input');
     this.submitButton = page.getByTestId('submit-button');
     this.mfaInput = page.getByTestId('mfa-input');
+    this.mfaSubmitButton = page.getByTestId('mfa-submit-button');
     this.loginError = page.getByTestId('login-error');
     this.mfaError = page.getByTestId('mfa-error');
   }
@@ -182,6 +191,17 @@ export class LoginPage {
    */
   async fillMfaCode(code: string): Promise<void> {
     await this.mfaInput.fill(code);
+  }
+
+  /**
+   * submitMfa
+   *
+   * Clicks the MFA form's submit button ("Verificare") to verify the TOTP code.
+   * This is separate from submit() because the login page has two forms, each
+   * with its own submit button.
+   */
+  async submitMfa(): Promise<void> {
+    await this.mfaSubmitButton.click();
   }
 
   // ── Assertions / state queries ─────────────────────────────────────────────

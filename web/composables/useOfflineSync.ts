@@ -1,4 +1,4 @@
-import { initSyncEngine, scheduleSyncSoon } from '~/lib/sync-engine';
+import { initSyncEngine, scheduleSyncSoon, onSyncFlush } from '~/lib/sync-engine';
 import * as queue from '~/lib/sync-queue';
 
 const isOnline = ref(true);
@@ -14,12 +14,24 @@ export function useOfflineSync() {
     isOnline.value = navigator.onLine;
     window.addEventListener('online', () => {
       isOnline.value = true;
+      // When connectivity is restored, flush any queued mutations.
+      // Without this, offline mutations would stay in the queue until the
+      // next enqueueMutation() call, which may never happen if the user
+      // is just viewing data after reconnecting.
+      scheduleSyncSoon();
     });
     window.addEventListener('offline', () => {
       isOnline.value = false;
     });
 
     initSyncEngine();
+
+    // When the sync engine finishes flushing the queue, refresh the pending
+    // count so the SyncStatus UI updates from "Sincronizare (N)" to "Sincronizat".
+    onSyncFlush(() => {
+      void refreshPendingCount();
+    });
+
     void refreshPendingCount();
   }
 

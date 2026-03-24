@@ -40,15 +40,20 @@ const isSidebarOpen = ref(false);
  * 3. Fetch the current school info for the top bar.
  */
 onMounted(async () => {
+  /* If the user profile is not loaded yet (e.g., fresh page load after login,
+   * or browser refresh), try to restore the session from the stored JWT token.
+   * We must do this BEFORE checking isAuthenticated, because the user ref
+   * starts as null on every fresh page load — the token in localStorage is
+   * the real source of truth for "was the user logged in?" */
+  if (user.value === null) {
+    await fetchProfile();
+  }
+
+  /* After attempting to restore the session, if still not authenticated
+   * (no valid token, or token expired and refresh failed), redirect to login. */
   if (!isAuthenticated.value) {
     await navigateTo('/login');
     return;
-  }
-
-  /* If we have a token but no user profile loaded (e.g. page refresh),
-   * fetch the profile from GET /users/me */
-  if (user.value === null) {
-    await fetchProfile();
   }
 
   /* Fetch the school info for display in the navigation bar */
@@ -123,6 +128,7 @@ const roleLabels: Record<string, string> = {
     <!-- Clicking the overlay closes the sidebar.                           -->
     <!-- ================================================================== -->
     <button
+      data-testid="sidebar-overlay"
       v-if="isSidebarOpen"
       type="button"
       aria-label="Închide meniul"
@@ -136,6 +142,7 @@ const roleLabels: Record<string, string> = {
     <!-- On mobile (<lg): slides in from the left, overlays content.        -->
     <!-- ================================================================== -->
     <aside
+      data-testid="sidebar"
       :class="[
         'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-gray-200 bg-white transition-transform duration-200 ease-in-out lg:static lg:translate-x-0',
         isSidebarOpen ? 'translate-x-0' : '-translate-x-full',
@@ -144,7 +151,7 @@ const roleLabels: Record<string, string> = {
       <!-- Sidebar header: school name -->
       <div class="flex h-16 items-center border-b border-gray-200 px-4">
         <div class="min-w-0 flex-1">
-          <h2 class="truncate text-sm font-semibold text-gray-900">
+          <h2 data-testid="school-name" class="truncate text-sm font-semibold text-gray-900">
             {{ currentSchool?.name ?? 'CatalogRO' }}
           </h2>
           <p class="truncate text-xs text-gray-500">Catalog Școlar Digital</p>
@@ -169,6 +176,7 @@ const roleLabels: Record<string, string> = {
       <!-- Navigation links -->
       <nav class="flex-1 space-y-1 px-3 py-4">
         <NuxtLink
+          data-testid="nav-item"
           v-for="item in navItems"
           :key="item.label"
           :to="item.to"
@@ -200,10 +208,10 @@ const roleLabels: Record<string, string> = {
             {{ user.firstName.charAt(0) }}{{ user.lastName.charAt(0) }}
           </div>
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium text-gray-900">
+            <p data-testid="user-name" class="truncate text-sm font-medium text-gray-900">
               {{ user.firstName }} {{ user.lastName }}
             </p>
-            <p class="truncate text-xs text-gray-500">
+            <p data-testid="user-role" class="truncate text-xs text-gray-500">
               {{ roleLabels[user.role] ?? user.role }}
             </p>
           </div>
@@ -222,6 +230,7 @@ const roleLabels: Record<string, string> = {
       >
         <!-- Mobile menu button (hamburger) — opens the sidebar on small screens -->
         <button
+          data-testid="mobile-menu-button"
           class="mr-3 rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700 lg:hidden"
           @click="toggleSidebar"
         >
@@ -245,7 +254,7 @@ const roleLabels: Record<string, string> = {
         <!-- Right side of top bar: sync status, user name, logout -->
         <div class="flex items-center gap-4">
           <!-- Sync status indicator (shows online/offline/syncing state) -->
-          <SyncSyncStatus />
+          <SyncStatus />
 
           <!-- Current user name + role badge (hidden on very small screens) -->
           <div v-if="user" class="hidden items-center gap-2 sm:flex">
@@ -257,6 +266,7 @@ const roleLabels: Record<string, string> = {
 
           <!-- Logout button -->
           <button
+            data-testid="logout-button"
             class="rounded-lg px-3 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
             @click="handleLogout"
           >

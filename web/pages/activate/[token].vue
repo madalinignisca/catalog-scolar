@@ -157,12 +157,16 @@ const roleLabels: Record<string, string> = {
       </div>
 
       <!-- Loading -->
-      <div v-if="state === 'loading'" class="py-8 text-center text-gray-500">
+      <div
+        data-testid="activate-loading"
+        v-if="state === 'loading'"
+        class="py-8 text-center text-gray-500"
+      >
         Se verifică link-ul de activare...
       </div>
 
       <!-- Error -->
-      <div v-else-if="state === 'error'" class="py-8 text-center">
+      <div data-testid="activate-error" v-else-if="state === 'error'" class="py-8 text-center">
         <p class="text-red-600">
           {{ error }}
         </p>
@@ -174,7 +178,7 @@ const roleLabels: Record<string, string> = {
       <!-- Ready: show user data + set password -->
       <div v-else-if="state === 'ready' && userData">
         <!-- Identity confirmation -->
-        <div class="mb-6 rounded-lg bg-blue-50 p-4">
+        <div data-testid="activate-identity" class="mb-6 rounded-lg bg-blue-50 p-4">
           <p class="text-sm font-medium text-blue-900">Confirmați identitatea</p>
           <div class="mt-2 space-y-1 text-sm text-blue-800">
             <p>
@@ -194,6 +198,7 @@ const roleLabels: Record<string, string> = {
               >Parolă nouă</label
             >
             <input
+              data-testid="activate-password"
               id="activate-password"
               v-model="password"
               type="password"
@@ -208,6 +213,7 @@ const roleLabels: Record<string, string> = {
               >Confirmă parola</label
             >
             <input
+              data-testid="activate-password-confirm"
               id="activate-password-confirm"
               v-model="passwordConfirm"
               type="password"
@@ -222,6 +228,7 @@ const roleLabels: Record<string, string> = {
           <div v-if="userData.requiresGdpr" class="rounded-lg border border-gray-200 p-4">
             <label class="flex items-start gap-3">
               <input
+                data-testid="activate-gdpr"
                 v-model="gdprConsent"
                 type="checkbox"
                 class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
@@ -239,6 +246,7 @@ const roleLabels: Record<string, string> = {
           </div>
 
           <button
+            data-testid="activate-submit"
             type="submit"
             :disabled="loading"
             class="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
@@ -295,7 +303,7 @@ const roleLabels: Record<string, string> = {
       </div>
 
       <!-- Done -->
-      <div v-else-if="state === 'done'" class="py-8 text-center">
+      <div data-testid="activate-success" v-else-if="state === 'done'" class="py-8 text-center">
         <div
           class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100"
         >

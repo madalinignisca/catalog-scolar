@@ -119,9 +119,10 @@ func run() error {
 	// Without CORS, the browser blocks cross-origin requests for security.
 	r.Use(cors.Handler(cors.Options{
 		// AllowedOrigins: which frontend origins can call this API.
-		// In development, the Nuxt dev server runs on localhost:3000.
-		// In production, this should be set to the actual domain (e.g., app.catalogro.ro).
-		AllowedOrigins: []string{"http://localhost:3000"},
+		// In development, the Nuxt dev server runs on 0.0.0.0:3000 and is accessed
+		// from both localhost and the VM's LAN IP. We allow all origins in dev mode;
+		// in production this should be locked to the actual domain (e.g., app.catalogro.ro).
+		AllowedOrigins: []string{"http://localhost:3000", "http://*:3000"},
 
 		// AllowedMethods: which HTTP methods are permitted for cross-origin requests.
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -204,11 +205,13 @@ func run() error {
 			// POST /auth/logout — clear the session (client discards tokens).
 			r.Post("/auth/logout", auth.HandleLogout())
 
-			// Activation endpoints — not yet implemented.
-			// These handle the flow where a provisioned user clicks their activation
-			// link, sets their password, and optionally configures 2FA.
-			r.Get("/auth/activate/{token}", notImplemented)
-			r.Post("/auth/activate", notImplemented)
+			// Activation endpoints — pre-login flow, no JWT required.
+			// GET  validates the token and returns the user's identity for the
+			//      confirmation screen (name, role, school).
+			// POST sets the password (and optional GDPR consent) and activates
+			//      the account. Both use a direct DB connection (no RLS).
+			r.Get("/auth/activate/{token}", auth.HandleGetActivation(queries))
+			r.Post("/auth/activate", auth.HandlePostActivation(queries))
 		})
 
 		// =====================================================================
@@ -305,7 +308,7 @@ func run() error {
 			r.Put("/catalog/evaluations/{evalId}", notImplemented)
 
 			// Sync
-			r.Post("/sync/push", notImplemented)
+			r.Post("/sync/push", catalogHandler.SyncPush)
 			r.Get("/sync/pull", notImplemented)
 
 			// Messages

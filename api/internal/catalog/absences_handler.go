@@ -114,6 +114,14 @@ func (h *Handler) ListAbsences(w http.ResponseWriter, r *http.Request) {
 // listAbsencesByDate handles the ?date=YYYY-MM-DD query mode for ListAbsences.
 // It returns all absences for the class on the specified date.
 func (h *Handler) listAbsencesByDate(w http.ResponseWriter, r *http.Request, classID uuid.UUID, dateStr string) {
+	// Retrieve the transaction-scoped Queries from context so that all database
+	// calls in this helper use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Parse the date string into a time.Time value.
 	absDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
@@ -122,7 +130,7 @@ func (h *Handler) listAbsencesByDate(w http.ResponseWriter, r *http.Request, cla
 	}
 
 	// Query the database for absences on this specific date.
-	rows, err := h.queries.ListAbsencesByClassDate(r.Context(), generated.ListAbsencesByClassDateParams{
+	rows, err := queries.ListAbsencesByClassDate(r.Context(), generated.ListAbsencesByClassDateParams{
 		ClassID:     classID,
 		AbsenceDate: pgtype.Date{Time: absDate, Valid: true},
 	})
@@ -161,6 +169,14 @@ func (h *Handler) listAbsencesByDate(w http.ResponseWriter, r *http.Request, cla
 // listAbsencesBySemesterMonth handles the ?semester=I&month=10 query mode.
 // It returns all absences for the class in the specified semester and calendar month.
 func (h *Handler) listAbsencesBySemesterMonth(w http.ResponseWriter, r *http.Request, classID uuid.UUID, semesterStr, monthStr string) {
+	// Retrieve the transaction-scoped Queries from context so that all database
+	// calls in this helper use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Validate the semester value.
 	if semesterStr != "I" && semesterStr != "II" {
 		httputil.BadRequest(w, "INVALID_SEMESTER", "semester must be 'I' or 'II'")
@@ -183,7 +199,7 @@ func (h *Handler) listAbsencesBySemesterMonth(w http.ResponseWriter, r *http.Req
 			return
 		}
 	} else {
-		sy, err := h.queries.GetCurrentSchoolYear(r.Context())
+		sy, err := queries.GetCurrentSchoolYear(r.Context())
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
@@ -197,7 +213,7 @@ func (h *Handler) listAbsencesBySemesterMonth(w http.ResponseWriter, r *http.Req
 	}
 
 	// Query the database for absences matching the semester and month.
-	rows, err := h.queries.ListAbsencesByClassSemesterMonth(r.Context(), generated.ListAbsencesByClassSemesterMonthParams{
+	rows, err := queries.ListAbsencesByClassSemesterMonth(r.Context(), generated.ListAbsencesByClassSemesterMonthParams{
 		ClassID:      classID,
 		Semester:     generated.Semester(semesterStr),
 		Column3:      int32(month), //nolint:gosec // month is validated 1-12, no overflow risk
@@ -280,6 +296,14 @@ func (h *Handler) CreateAbsence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the JSON request body.
 	var req createAbsenceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -319,7 +343,7 @@ func (h *Handler) CreateAbsence(w http.ResponseWriter, r *http.Request) {
 	// Step 6: Authorization check — verify teacher assignment.
 	// Admins bypass this check.
 	if role == "teacher" {
-		_, err := h.queries.CheckTeacherClassSubject(r.Context(), generated.CheckTeacherClassSubjectParams{
+		_, err := queries.CheckTeacherClassSubject(r.Context(), generated.CheckTeacherClassSubjectParams{
 			TeacherID: userID,
 			ClassID:   req.ClassID,
 			SubjectID: req.SubjectID,
@@ -336,7 +360,7 @@ func (h *Handler) CreateAbsence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 7: Get the current school year to determine the semester.
-	schoolYear, err := h.queries.GetCurrentSchoolYear(r.Context())
+	schoolYear, err := queries.GetCurrentSchoolYear(r.Context())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
@@ -366,7 +390,7 @@ func (h *Handler) CreateAbsence(w http.ResponseWriter, r *http.Request) {
 	// Step 10: Insert the absence into the database.
 	// New absences always start as "unexcused" — they are excused later by
 	// the homeroom teacher (diriginte) via the PUT /excuse endpoint.
-	absence, err := h.queries.CreateAbsence(r.Context(), generated.CreateAbsenceParams{
+	absence, err := queries.CreateAbsence(r.Context(), generated.CreateAbsenceParams{
 		StudentID:       req.StudentID,
 		ClassID:         req.ClassID,
 		SubjectID:       req.SubjectID,
@@ -429,6 +453,14 @@ func (h *Handler) ExcuseAbsence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1b: Retrieve the transaction-scoped Queries from context so that
+	// all database calls in this handler use the RLS-enabled transaction.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
 	// Step 2: Parse the absence ID from the URL.
 	absenceID, err := uuid.Parse(chi.URLParam(r, "absenceId"))
 	if err != nil {
@@ -459,7 +491,7 @@ func (h *Handler) ExcuseAbsence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Verify the absence exists.
-	_, err = h.queries.GetAbsenceByID(r.Context(), absenceID)
+	_, err = queries.GetAbsenceByID(r.Context(), absenceID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.NotFound(w, "Absence not found")
@@ -472,7 +504,7 @@ func (h *Handler) ExcuseAbsence(w http.ResponseWriter, r *http.Request) {
 
 	// Step 6: Update the absence with the excuse information.
 	// The excused_by field records who excused it, and excused_at records when.
-	updated, err := h.queries.ExcuseAbsence(r.Context(), generated.ExcuseAbsenceParams{
+	updated, err := queries.ExcuseAbsence(r.Context(), generated.ExcuseAbsenceParams{
 		ID:           absenceID,
 		AbsenceType:  absType,
 		ExcusedBy:    pgtype.UUID{Bytes: userID, Valid: true},

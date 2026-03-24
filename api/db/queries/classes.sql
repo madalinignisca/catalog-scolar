@@ -82,7 +82,10 @@ SELECT * FROM subjects WHERE id = $1;
 -- Returns the school for the current RLS tenant (current_school_id()).
 -- Used by /schools/current. The RLS policy on schools is NOT enabled
 -- (schools is a non-tenant table), so we filter explicitly.
-SELECT * FROM schools WHERE id = current_school_id();
+-- Note: we select specific columns instead of SELECT * to avoid the
+-- education_levels array column which requires custom pgx type registration.
+SELECT id, district_id, name, siiir_code, address, city, county, phone, email, is_active, created_at, updated_at
+FROM schools WHERE id = current_school_id();
 
 -- name: GetGradeByID :one
 -- Returns a single grade by its ID (only non-deleted grades).
