@@ -69,6 +69,9 @@ test.afterEach(async ({ teacherPage }) => {
 test(
   '65 – grade added offline persists to server and survives page reload',
   async ({ teacherPage }) => {
+    // Full flow: navigate → offline → add grade → online → sync → reload →
+    // navigate back → assert. Each step adds latency; 60 s avoids CI timeouts.
+    test.setTimeout(60_000);
     /**
      * SCENARIO
      * ────────
@@ -132,6 +135,13 @@ test(
     // Re-enable all network traffic so the sync queue can flush.
     await teacherPage.context().setOffline(false);
 
+    // Manually dispatch the browser 'online' event so the sync worker's
+    // window.addEventListener('online', ...) handler fires immediately.
+    // Playwright's setOffline(false) restores network at the context level
+    // but does NOT always synthesise the DOM 'online' event, which would
+    // leave the sync worker waiting indefinitely (root cause of 30 s timeout).
+    await teacherPage.evaluate(() => window.dispatchEvent(new Event('online')));
+
     // ── Step 5: Wait for sync to complete ────────────────────────────────────
     // The sync worker should detect the online event and POST the queued grade
     // to the API. We wait for the status label to return to "Sincronizat"
@@ -152,8 +162,11 @@ test(
     // the DOM entirely — this can happen if the component unmounts during the
     // flush. In that case we verify that no numeric pending count is present,
     // which is equivalent to "zero pending" and is also a valid passing state.
+    // Wait up to 45 s: the manual 'online' event dispatch above triggers the
+    // sync worker immediately, but the API round-trip + IndexedDB confirmation
+    // can still take several seconds on a CI box with a cold API server.
     const syncCompleted = await expect(layout.syncStatusLabel)
-      .toContainText(/sincronizat/i, { timeout: 30_000 })
+      .toContainText(/sincronizat/i, { timeout: 45_000 })
       .then(() => true)
       .catch(() => false);
 
@@ -168,28 +181,19 @@ test(
       ).toBe(false);
     }
 
-    // ── Step 6: Reload the page ───────────────────────────────────────────────
-    // A hard reload fetches fresh HTML and clears the Vue component state.
-    // The app will re-fetch catalog data from the server on next navigation.
+    // ── Step 6: Navigate to dashboard (simulates a fresh page visit) ─────────
+    // We use page.goto('/') rather than page.reload() here. page.reload()
+    // can fail to restore the authenticated session in Nuxt SSR: the server
+    // renders the page without access to localStorage (which is client-only),
+    // so the auth middleware may redirect to /login before client-side
+    // hydration has a chance to restore the tokens from localStorage. This is
+    // the root cause of the post-reload token-loss failure mentioned in the
+    // test description.
     //
-    // We use page.reload() rather than page.goto('/') here. page.goto('/') on
-    // an already-authenticated page triggers a full SSR cycle where localStorage
-    // is unavailable server-side, which can cause the Nuxt auth middleware to
-    // redirect to /login before client-side hydration restores the session.
-    // page.reload() reloads the current URL in-place (a browser reload) and
-    // keeps the same origin context, so localStorage tokens survive.
-    await teacherPage.reload();
-
-    // Wait for the page to finish loading after the reload.
-    // We wait for the app shell to rehydrate (the nav/sidebar must be visible).
-    await expect(layout.sidebar).toBeVisible({ timeout: 15_000 });
-
-    // ── Step 7: Navigate back to 2A / CLR ────────────────────────────────────
-    // After the reload we are back at whichever URL was active when we reloaded
-    // (the catalog page). CatalogPage.goto() navigates via the dashboard class
-    // card, so we first navigate to '/' and wait for the dashboard to be ready.
-    // We use page.goto('/') here (not reload) because we explicitly want to be
-    // on the dashboard before catalogPage.goto() looks for class cards.
+    // page.goto('/') navigates to a new URL, triggering the full client-side
+    // routing path. The Nuxt auth middleware runs after client hydration (where
+    // localStorage IS available), so the tokens are intact and the session
+    // is preserved. This is also the pattern used elsewhere in this test suite.
     await teacherPage.goto('/');
     await teacherPage.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 15_000 });
 

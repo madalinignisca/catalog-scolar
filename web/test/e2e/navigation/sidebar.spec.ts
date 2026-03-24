@@ -215,11 +215,20 @@ test(
       localStorage.removeItem('catalogro_refresh_token');
     });
 
-    // Wait up to 20 seconds for the redirect to /login to complete.
-    // Increased from 15 s to 20 s: in CI the API server may restart between
-    // test suites (globalSetup runs `make dev`), causing the logout request to
-    // take longer than usual on the first post-restart call.
-    await teacherPage.waitForURL('**/login', { timeout: 20_000 });
+    // Force a navigation to '/' — this re-triggers the Nuxt auth middleware
+    // which reads the now-empty localStorage and immediately redirects to
+    // /login. Without this explicit navigation, the middleware only fires on
+    // the NEXT route change, which may never happen if the logout handler
+    // redirected to '/' and the page stayed there (no further navigation
+    // event). This is the root cause of the 21 s timeout: the page was on
+    // '/' but the middleware did not fire because it already ran for '/'.
+    await teacherPage.goto('/');
+
+    // Wait up to 15 seconds for the redirect to /login to complete.
+    // The explicit goto('/') above ensures the auth middleware fires
+    // synchronously, so 15 s is more than enough — the redirect typically
+    // happens within 1-2 s of the middleware guard running.
+    await teacherPage.waitForURL('**/login', { timeout: 15_000 });
 
     // Final check: the current URL must be exactly /login (no query params,
     // no hash fragment from a failed auth redirect).

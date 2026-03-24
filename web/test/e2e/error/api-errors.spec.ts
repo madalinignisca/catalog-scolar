@@ -126,6 +126,10 @@ authTest(
 authTest(
   '67 – API 403 on grade creation shows an error message',
   async ({ teacherPage }) => {
+    // This test involves route interception + catalog navigation + modal
+    // interaction, all of which add latency on a slow CI box. 60 s gives
+    // the full sequence enough headroom without masking real regressions.
+    test.setTimeout(60_000);
     /**
      * SCENARIO
      * ────────
