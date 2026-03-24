@@ -129,6 +129,17 @@ test(
     // Allow 15 s for the fixture-based login and initial page render to settle.
     await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
+    // Wait for Vue hydration to complete so the @click handler is attached.
+    // Without this, the button is server-rendered HTML and clicking it does
+    // nothing because the event listener hasn't been registered yet.
+    await teacherPage.waitForFunction(
+      () => {
+        const el = document.querySelector('#__nuxt');
+        return el != null && '__vue_app__' in el;
+      },
+      { timeout: 10_000 },
+    );
+
     // Open the mobile sidebar drawer.
     await layout.openMobileMenu();
 
