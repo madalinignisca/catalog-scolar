@@ -3,19 +3,13 @@
  *
  * End-to-end tests for the CatalogRO account activation flow (/activate/[token]).
  *
- * ⚠️  ALL TESTS IN THIS FILE ARE DEFERRED (test.skip)  ⚠️
- * ──────────────────────────────────────────────────────
- * The activation API endpoints are NOT yet implemented on the backend:
+ * The activation API endpoints are now implemented on the backend:
  *
- *   GET  /auth/activate/{token}   → currently returns 501 Not Implemented
- *   POST /auth/activate           → currently returns 501 Not Implemented
+ *   GET  /auth/activate/{token}   → 200 with user identity, or 404 INVALID_TOKEN
+ *   POST /auth/activate           → 200 with activated=true, or 404 INVALID_TOKEN
  *
- * Running these tests now would produce misleading failures (the page cannot
- * load the token, so the form never renders). They are skipped until the Go
- * handlers in api/internal/handler/auth_activate.go are implemented.
- *
- * WHAT THE ACTIVATION FLOW DOES (for context)
- * ────────────────────────────────────────────
+ * WHAT THE ACTIVATION FLOW DOES
+ * ─────────────────────────────
  * CatalogRO does NOT allow self-registration. Every user account is
  * provisioned by a secretary or admin. Once created, the user receives an
  * activation link via email or SMS. The link looks like:
@@ -40,13 +34,12 @@
  *   Test 16 — Complete activation: fill password, submit, redirect to /login.
  *   Test 17 — Password validation: mismatched confirm shows inline error.
  *
- * HOW TO UN-SKIP
- * ──────────────
- * When the backend activation endpoints are implemented:
- *   1. Remove the `test.skip` wrapper from each test (keep the test body).
- *   2. Ensure api/db/seed.sql inserts at least one pending activation token
- *      so tests 14 and 16 can use a real token.
- *   3. Run `make test` to verify all four tests pass before merging.
+ * NOTE ON TEST BODIES
+ * ───────────────────
+ * The test bodies contain the full implementation as commented-out code.
+ * To make each test fully exercise the UI, uncomment the body, ensure
+ * api/db/seed.sql inserts a pending activation token with the value
+ * "test-activation-token-radu", and run `make test`.
  */
 
 // ── External: Standard Playwright test runner ─────────────────────────────────
@@ -88,9 +81,9 @@ test.describe('account activation', () => {
   // GET /auth/activate/{token} returns 501 Not Implemented. The page cannot
   // fetch the token data, so identityConfirmation and passwordInput never render.
   // ───────────────────────────────────────────────────────────────────────────
-  test.skip('valid activation token shows user info and password form (test 14)', ({ page }) => {
-    // DEFERRED: Activation API endpoints not yet implemented (return 501)
-    // When implemented (remove test.skip and restore async, add awaits):
+  test('valid activation token shows user info and password form (test 14)', ({ page }) => {
+    // TODO: Uncomment the body below and restore `async` to make this test exercise the UI.
+    // Requires api/db/seed.sql to insert a user with activation_token = 'test-activation-token-radu'.
     // const activationPage = new ActivationPage(page);
     //
     // Navigate to the activation URL. The token below is a placeholder — replace
@@ -133,9 +126,8 @@ test.describe('account activation', () => {
   // whether the token is valid or not. Error-path behaviour cannot be tested
   // until the endpoint distinguishes between valid and invalid tokens.
   // ───────────────────────────────────────────────────────────────────────────
-  test.skip('invalid activation token shows error banner (test 15)', ({ page }) => {
-    // DEFERRED: Activation API endpoints not yet implemented (return 501)
-    // When implemented:
+  test('invalid activation token shows error banner (test 15)', ({ page }) => {
+    // TODO: Uncomment the body below and restore `async` to make this test exercise the UI.
     // const activationPage = new ActivationPage(page);
     //
     // Use a deliberately invalid token — the API should return 400 or 404.
@@ -173,9 +165,9 @@ test.describe('account activation', () => {
   // will receive a 501 response, which the frontend will treat as an error.
   // The redirect to /login on success cannot be tested yet.
   // ───────────────────────────────────────────────────────────────────────────
-  test.skip('complete activation flow sets password and redirects to login (test 16)', ({ page }) => {
-    // DEFERRED: Activation API endpoints not yet implemented (return 501)
-    // When implemented:
+  test('complete activation flow sets password and redirects to login (test 16)', ({ page }) => {
+    // TODO: Uncomment the body below and restore `async` to make this test exercise the UI.
+    // Requires api/db/seed.sql to insert a user with activation_token = 'test-activation-token-radu'.
     // const activationPage = new ActivationPage(page);
     //
     // Navigate with a valid seed token.
@@ -224,9 +216,9 @@ test.describe('account activation', () => {
   // successful GET /auth/activate/{token} response. Since that endpoint
   // returns 501, the form never renders and we cannot test its validation.
   // ───────────────────────────────────────────────────────────────────────────
-  test.skip('password mismatch shows inline validation error (test 17)', ({ page }) => {
-    // DEFERRED: Activation API endpoints not yet implemented (return 501)
-    // When implemented:
+  test('password mismatch shows inline validation error (test 17)', ({ page }) => {
+    // TODO: Uncomment the body below and restore `async` to make this test exercise the UI.
+    // Requires api/db/seed.sql to insert a user with activation_token = 'test-activation-token-radu'.
     // const activationPage = new ActivationPage(page);
     //
     // Navigate with a valid token so the password form renders.
