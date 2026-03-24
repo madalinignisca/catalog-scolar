@@ -14,6 +14,11 @@ export function useOfflineSync() {
     isOnline.value = navigator.onLine;
     window.addEventListener('online', () => {
       isOnline.value = true;
+      // When connectivity is restored, flush any queued mutations.
+      // Without this, offline mutations would stay in the queue until the
+      // next enqueueMutation() call, which may never happen if the user
+      // is just viewing data after reconnecting.
+      scheduleSyncSoon();
     });
     window.addEventListener('offline', () => {
       isOnline.value = false;
