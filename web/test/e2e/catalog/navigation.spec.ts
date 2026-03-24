@@ -242,7 +242,7 @@ test(
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
     // Click the CLR tab. The UI must then fetch and display CLR grades.
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
 
     // After the click, wait for the grade grid to reflect the new subject.
     // At minimum, one student row must become visible. This confirms the API

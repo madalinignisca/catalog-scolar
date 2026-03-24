@@ -59,7 +59,7 @@ test(
 
     // Wait for subject tabs before clicking.
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
 
     // Wait for all 5 student rows to appear.
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
@@ -122,7 +122,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Iterate over each student row and check for required sub-elements.
@@ -164,7 +164,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Andrei Moldovan: FB ───────────────────────────────────────────────────
@@ -210,7 +210,7 @@ test(
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
     // Ion Vasilescu teaches ROM and IST in class 6B.
-    await catalogPage.clickSubjectTab('ROM');
+    await catalogPage.clickSubjectTab('Limba');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Alexandru Pop: grades 9 and 8 ────────────────────────────────────────
@@ -253,7 +253,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Locate the grade badge for Andrei Moldovan (has seed grade FB).
@@ -322,7 +322,7 @@ test(
     await catalogPage.goto(TEST_CLASSES.class6B.id);
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('ROM');
+    await catalogPage.clickSubjectTab('Limba');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Locate Alexandru Pop's row.

@@ -75,7 +75,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('ROM');
+    await catalogPage.clickSubjectTab('Limba');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Part A: verify existing thesis grade for Alexandru Pop ────────────────
@@ -178,7 +178,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('ROM');
+    await catalogPage.clickSubjectTab('Limba');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Locate Alexandru Pop's row.
@@ -272,7 +272,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Open the add-grade modal for Matei Mureșan.

@@ -105,7 +105,7 @@ authTest(
     // The class header and tabs load from a separate endpoint that is NOT
     // intercepted. We wait for them to confirm the page reached a stable state.
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
 
     // ── Assert error element is visible ───────────────────────────────────────
     // The grade grid error element should appear in response to the 500.
@@ -154,7 +154,7 @@ authTest(
     // ── Navigate and wait for the grid to load normally ───────────────────────
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Now intercept only the POST grades endpoint ───────────────────────────

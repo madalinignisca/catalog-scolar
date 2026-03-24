@@ -97,7 +97,7 @@ test(
     // ── Step 1: Navigate to catalog (still online) ────────────────────────────
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Step 2: Go offline ────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ test(
     // After reload we are back at the dashboard — navigate to the catalog again.
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Step 8: Verify grade persisted after reload ───────────────────────────

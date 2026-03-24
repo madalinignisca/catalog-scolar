@@ -147,7 +147,7 @@ test(
     // ── Navigate to class 2A / CLR ────────────────────────────────────────────
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
 
     // Confirm Semester I loads with 5 student rows.
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
@@ -214,7 +214,7 @@ test(
     // ── Navigate to class 2A / CLR ────────────────────────────────────────────
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 10_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Switch to Semester II ─────────────────────────────────────────────────

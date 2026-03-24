@@ -86,7 +86,7 @@ test.beforeEach(async ({ teacherPage }) => {
   await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
 
   // Switch to the CLR subject (Comunicare în Limba Română — primary literacy).
-  await catalogPage.clickSubjectTab('CLR');
+  await catalogPage.clickSubjectTab('Comunicare');
 
   // Confirm all 5 students are visible in the grade grid before testing.
   await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });

@@ -78,7 +78,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Open the grade modal for Mircea Toma (last-name "Toma").
@@ -140,7 +140,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('ROM');
+    await catalogPage.clickSubjectTab('Limba');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Open the grade modal for David Bogdan (last-name "Bogdan").
@@ -196,7 +196,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Verify the existing FB badge is present before editing.
@@ -262,7 +262,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // Locate Crișan's row. Try both diacritic and ASCII forms.
@@ -352,7 +352,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('CLR');
+    await catalogPage.clickSubjectTab('Comunicare');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── PART A: Empty form submission ─────────────────────────────────────────
@@ -421,7 +421,7 @@ test(
 
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('ROM');
+    await catalogPage.clickSubjectTab('Limba');
     await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
 
     // ── Read current average ──────────────────────────────────────────────────
