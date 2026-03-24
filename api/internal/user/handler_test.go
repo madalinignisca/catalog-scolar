@@ -606,7 +606,7 @@ func TestProvisionUser_DuplicateEmail(t *testing.T) {
 	// Second call: same email — should fail with a DB constraint violation.
 	// -----------------------------------------------------------------------
 	body2 := map[string]any{
-		"role":       "secretary", // different role, same email — still a duplicate
+		"role":       "teacher", // same role + same email + same school = unique constraint violation
 		"email":      duplicateEmail,
 		"first_name": "Maria",
 		"last_name":  "Ionescu",
