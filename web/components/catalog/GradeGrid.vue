@@ -138,10 +138,13 @@ const usesQualifiers = computed(() => props.educationLevel === 'primary');
  * @returns A string representation of the grade value
  */
 function gradeDisplayValue(grade: Grade): string {
-  if (grade.numericGrade !== null) {
+  // Use != null (loose equality) to catch both null AND undefined.
+  // The API may omit numeric_grade entirely (undefined after snakeToCamel)
+  // rather than sending it as null.
+  if (grade.numericGrade != null) {
     return String(grade.numericGrade);
   }
-  if (grade.qualifierGrade !== null) {
+  if (grade.qualifierGrade != null) {
     return grade.qualifierGrade;
   }
   return '—';
@@ -193,10 +196,10 @@ function numericGradeColorClasses(grade: number): string {
  * @returns Tailwind CSS class string
  */
 function gradeBadgeClasses(grade: Grade): string {
-  if (grade.qualifierGrade !== null) {
+  if (grade.qualifierGrade != null) {
     return qualifierColorClasses(grade.qualifierGrade);
   }
-  if (grade.numericGrade !== null) {
+  if (grade.numericGrade != null) {
     return numericGradeColorClasses(grade.numericGrade);
   }
   return 'bg-gray-100 text-gray-800 border-gray-200';
