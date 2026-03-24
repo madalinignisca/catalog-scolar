@@ -308,7 +308,7 @@ func run() error {
 			r.Put("/catalog/evaluations/{evalId}", notImplemented)
 
 			// Sync
-			r.Post("/sync/push", notImplemented)
+			r.Post("/sync/push", catalogHandler.SyncPush)
 			r.Get("/sync/pull", notImplemented)
 
 			// Messages
