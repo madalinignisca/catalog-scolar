@@ -156,10 +156,19 @@ export interface UpdateGradePayload {
 /** Response type for GET /classes (api() auto-unwraps the { data: ... } envelope) */
 type ClassesResponse = TeacherClass[];
 
-/** Response type for class teachers (GET /classes/{classId}/teachers) */
+/**
+ * Response type for class teachers (GET /classes/{classId}/teachers).
+ * The API returns a FLAT list of teacher-subject assignments (one row per
+ * teacher-subject pair), not grouped by teacher. After snakeToCamel conversion:
+ *   { teacherId, firstName, lastName, subjectId, subjectName, hoursPerWeek }
+ */
 type ClassTeachersResponse = Array<{
   teacherId: string;
-  subjects: TeacherSubject[];
+  firstName: string;
+  lastName: string;
+  subjectId: string;
+  subjectName: string;
+  hoursPerWeek: number;
 }>;
 
 /** Response type for grades grid (GET /catalog/classes/{classId}/subjects/{subjectId}/grades) */
@@ -234,11 +243,17 @@ export function useCatalog() {
     try {
       const response = await api<ClassTeachersResponse>(`/classes/${classId}/teachers`);
 
-      /* Find the current teacher in the list of teachers for this class.
-       * The API returns all teachers for the class, so we filter by ID. */
-      const myAssignment = response.find((t) => t.teacherId === currentUserId);
+      /* The API returns a flat list of teacher-subject assignments:
+       *   [{ teacherId, subjectId, subjectName, ... }, ...]
+       * Filter to the current teacher, then map each row to a TeacherSubject. */
+      const myAssignments = response.filter((t) => t.teacherId === currentUserId);
 
-      return myAssignment?.subjects ?? [];
+      return myAssignments.map((a) => ({
+        id: a.subjectId,
+        name: a.subjectName,
+        shortName: null,
+        hasThesis: false,
+      }));
     } catch (e: unknown) {
       error.value = e instanceof Error ? e.message : 'Nu s-au putut încărca materiile';
       return [];
