@@ -152,17 +152,21 @@ test(
     // If the overlay is not present (e.g. not yet implemented), we fall back
     // to simply confirming the sidebar itself is visible — this prevents the
     // test from failing on overlay-render timing when the sidebar IS open.
-    const overlayVisible = await layout.sidebarOverlay.isVisible({ timeout: 5_000 } as never).catch(() => false);
-    if (overlayVisible) {
+    // Wait for the overlay to appear. Use waitFor() which properly polls
+    // (unlike isVisible() which is a single instant check with no retry).
+    const overlayAppeared = await layout.sidebarOverlay
+      .waitFor({ state: 'visible', timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (overlayAppeared) {
       await expect(
         layout.sidebarOverlay,
         'Sidebar overlay/backdrop should be visible when the drawer is open',
       ).toBeVisible();
     } else {
-      // Overlay not yet rendered — assert the sidebar itself is visible as the
-      // fallback proof that the drawer opened. This keeps the test correct
-      // (we are still verifying the drawer opened) without coupling it to
-      // overlay render timing which can lag behind the sidebar animation.
+      // Overlay not rendered within 5s — assert the sidebar itself is visible
+      // as fallback proof the drawer opened.
       await expect(
         layout.sidebar,
         'Sidebar drawer should be visible after opening (overlay not yet rendered)',
