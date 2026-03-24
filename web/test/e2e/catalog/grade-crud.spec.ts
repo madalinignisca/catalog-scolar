@@ -236,10 +236,12 @@ test(
     // ── Modal opens in edit mode ──────────────────────────────────────────────
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
-    // In edit mode the modal title should include "Editează" (Romanian for Edit).
-    // We use a flexible regex to avoid depending on exact capitalisation.
+    // In edit mode the modal title should indicate an edit operation.
+    // GradeInput.vue renders "Modifică nota" when editing.
+    // We use a flexible regex that matches Romanian "Modifică" or English "Edit"
+    // to stay resilient across future i18n changes.
     const modalTitle = await modal.getTitle();
-    expect(modalTitle.toLowerCase()).toMatch(/edit/i);
+    expect(modalTitle.toLowerCase()).toMatch(/modific|edit/i);
 
     // ── Change qualifier to a different value ─────────────────────────────────
     await modal.selectQualifier(targetQualifier);

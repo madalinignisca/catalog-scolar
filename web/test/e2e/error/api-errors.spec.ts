@@ -190,14 +190,20 @@ authTest(
 
     // ── Assert an error message appears ──────────────────────────────────────
     // The UI must show some form of error feedback after the 403 response.
-    // We check two common patterns:
-    //   Pattern A — The modal stays open and shows a validation/API error.
-    //   Pattern B — A toast or banner appears outside the modal.
+    // We check three common patterns:
+    //   Pattern A — A dedicated grade-api-error element near the modal.
+    //   Pattern B — The modal's own inline validation error element.
+    //   Pattern C — The GradeGrid error banner (grade-grid-error), which is
+    //               what useCatalog sets via error.value when addGrade throws.
+    //               GradeGrid.vue renders this at data-testid="grade-grid-error".
     //
-    // We check for the modal validation error first (most common pattern).
-    const modalError = teacherPage.getByTestId('grade-api-error').or(
-      modal.validationError,
-    );
+    // The modal closes after a save attempt even on API failure (handleSaveGrade
+    // always calls closeGradeInput after the try block). The error surfaces in
+    // the grid-level error banner, not inside the modal itself.
+    const modalError = teacherPage
+      .getByTestId('grade-api-error')
+      .or(modal.validationError)
+      .or(teacherPage.getByTestId('grade-grid-error'));
 
     // Allow slightly more time — the error may appear after a brief retry delay.
     await expect(modalError).toBeVisible({ timeout: 8_000 });

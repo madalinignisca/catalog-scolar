@@ -147,6 +147,7 @@ function openClass(classItem: TeacherClass): void {
 
     <!-- Empty state: no classes assigned to this teacher -->
     <div
+      data-testid="empty-state"
       v-else-if="classes?.length === 0 && error === null"
       class="rounded-xl border-2 border-dashed border-gray-300 p-12 text-center"
     >

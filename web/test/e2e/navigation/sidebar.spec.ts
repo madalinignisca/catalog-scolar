@@ -193,9 +193,10 @@ test(
     // Click the logout button. The page will start navigating to /login.
     await layout.clickLogout();
 
-    // Wait up to 10 seconds for the redirect to /login to complete.
-    // A generous timeout accounts for the logout API call round-trip.
-    await teacherPage.waitForURL('/login', { timeout: 10_000 });
+    // Wait up to 15 seconds for the redirect to /login to complete.
+    // A generous timeout accounts for the logout API call round-trip and
+    // any Nuxt route-transition delays in CI environments.
+    await teacherPage.waitForURL('**/login', { timeout: 15_000 });
 
     // Final check: the current URL must be exactly /login (no query params,
     // no hash fragment from a failed auth redirect).

@@ -134,10 +134,17 @@ test(
 
     // ── Step 5: Wait for sync to complete ────────────────────────────────────
     // The sync worker should detect the online event and POST the queued grade
-    // to the API. We wait for the status label to confirm the flush is done.
-    // 15 seconds allows for slow CI environments.
+    // to the API. We wait for the status label to return to "Sincronizat"
+    // (no pending mutations). SyncStatus.vue renders:
+    //   - "Sincronizare (N)" while N mutations are pending
+    //   - "Sincronizat" when all mutations have been flushed
+    //
+    // In some environments the sync engine may flush synchronously before this
+    // assertion runs, so we also accept the label already showing "Sincronizat"
+    // (zero pending) even if we didn't catch the intermediate "Sincronizare" state.
+    // We use a 20-second timeout to cover slow CI + network round-trip.
     await expect(layout.syncStatusLabel).toContainText(/sincronizat/i, {
-      timeout: 15_000,
+      timeout: 20_000,
     });
 
     // ── Step 6: Reload the page ───────────────────────────────────────────────

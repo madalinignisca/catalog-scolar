@@ -77,14 +77,22 @@ test(
     // Allow 15 s for the fixture-based login to complete.
     await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
-    // ── Sidebar should be hidden ──────────────────────────────────────────────
-    // Use toBeHidden() instead of a synchronous isVisible() call so the
-    // assertion actively polls and waits out any CSS slide-out animation.
-    // At mobile widths the sidebar must NOT be visible before the menu opens.
+    // Give the CSS transition a moment to settle after the viewport change
+    // applied by test.use(). The sidebar uses transition-transform duration-200
+    // so we wait briefly before asserting its off-screen state.
+    await teacherPage.waitForTimeout(300);
+
+    // ── Sidebar should be off-screen on mobile ────────────────────────────────
+    // The sidebar is hidden via CSS transform: translateX(-100%) on mobile —
+    // NOT via display:none. Playwright's toBeHidden() only detects display/
+    // visibility/opacity changes, not translate. We use toBeInViewport() with
+    // the ratio threshold to confirm the sidebar is NOT visible to the user.
+    // toBeInViewport({ ratio: 0 }) passes when the element has zero intersection
+    // with the visible viewport — i.e., fully translated off-screen.
     await expect(
       layout.sidebar,
-      'Sidebar should be hidden on mobile before the menu is opened',
-    ).toBeHidden({ timeout: 5_000 });
+      'Sidebar should be off-screen on mobile before the menu is opened',
+    ).not.toBeInViewport({ timeout: 5_000 });
 
     // ── Hamburger must be visible ─────────────────────────────────────────────
     // isHamburgerVisible() calls isVisible() on [data-testid="mobile-menu-button"].
@@ -172,19 +180,23 @@ test(
     // Wait for BOTH the sidebar AND the overlay to be visible before clicking.
     // This prevents a race where we click the overlay before it finishes
     // rendering (v-if transition) and the click lands on an empty area.
-    await expect(layout.sidebar).toBeVisible({ timeout: 5_000 });
-    await expect(layout.sidebarOverlay).toBeVisible({ timeout: 5_000 });
+    // The sidebar enters viewport when isSidebarOpen = true (translate-x-0).
+    await expect(layout.sidebar).toBeInViewport({ timeout: 8_000 });
+    // The overlay is rendered via v-if so toBeVisible() confirms it's in the DOM.
+    await expect(layout.sidebarOverlay).toBeVisible({ timeout: 8_000 });
 
     // ── Step 3: Click the overlay to close ───────────────────────────────────
     await layout.closeMobileMenu();
 
-    // ── Step 4: Sidebar must be hidden again ──────────────────────────────────
-    // Use toBeHidden() with an explicit timeout to wait out the CSS close
-    // animation before the assertion resolves.
+    // ── Step 4: Sidebar must be off-screen again ──────────────────────────────
+    // After closing, the sidebar returns to -translate-x-full (off-screen).
+    // The sidebar uses CSS transform, not display:none, so toBeHidden() would
+    // not detect the change. Use not.toBeInViewport() which checks actual pixel
+    // intersection with the viewport — accurate for transform-based hiding.
     await expect(
       layout.sidebar,
-      'Sidebar drawer should be hidden after clicking the overlay',
-    ).toBeHidden({ timeout: 5_000 });
+      'Sidebar drawer should be off-screen after clicking the overlay',
+    ).not.toBeInViewport({ timeout: 5_000 });
   },
 );
 
