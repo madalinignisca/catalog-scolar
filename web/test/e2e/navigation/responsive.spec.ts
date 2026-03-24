@@ -205,8 +205,17 @@ test(
     const layout = new LayoutPage(teacherPage);
 
     // ── Step 1: Open the drawer ───────────────────────────────────────────────
-    // Allow 15 s for the fixture-based login and initial page render to settle.
     await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
+
+    // Wait for Vue hydration so the @click handler is attached.
+    await teacherPage.waitForFunction(
+      () => {
+        const el = document.querySelector('#__nuxt');
+        return el != null && '__vue_app__' in el;
+      },
+      { timeout: 10_000 },
+    );
+
     await layout.openMobileMenu();
 
     // ── Step 2: Wait for the drawer to be fully open ──────────────────────────
