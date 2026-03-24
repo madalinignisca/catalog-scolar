@@ -114,6 +114,42 @@ func GetSchoolID(ctx context.Context) (uuid.UUID, error) {
 	return parsed, nil
 }
 
+// =============================================================================
+// Context setter helpers (for use in tests and middleware)
+// =============================================================================
+
+// WithClaims returns a new context with the given Claims embedded under the
+// standard claimsKey. This is the companion to GetClaims: middleware uses
+// WithClaims to store claims after JWT validation, and GetClaims retrieves them.
+//
+// Outside of the JWTAuth middleware, this function is most commonly used in
+// integration tests to inject a fake authenticated identity without needing a
+// real JWT token:
+//
+//	claims := &auth.Claims{UserID: adminID.String(), SchoolID: schoolID.String(), Role: "admin"}
+//	ctx := auth.WithClaims(r.Context(), claims)
+//	r = r.WithContext(ctx)
+func WithClaims(ctx context.Context, claims *Claims) context.Context {
+	// Store the claims under the same key that JWTAuth middleware uses.
+	// Using context.WithValue returns a new context — the original is not modified.
+	return context.WithValue(ctx, claimsKey, claims)
+}
+
+// WithQueries returns a new context with the given Queries object embedded
+// under the standard queriesKey. This is the companion to GetQueries.
+//
+// The TenantContext middleware uses this to store a transaction-scoped Queries
+// object after setting the RLS tenant. Tests can use it to inject a pre-configured
+// Queries instance (already bound to a transaction with the tenant set):
+//
+//	queries := generated.New(pool).WithTx(tx)
+//	ctx := auth.WithQueries(r.Context(), queries)
+//	r = r.WithContext(ctx)
+func WithQueries(ctx context.Context, queries *generated.Queries) context.Context {
+	// Store the queries under the same key that TenantContext middleware uses.
+	return context.WithValue(ctx, queriesKey, queries)
+}
+
 // GetUserRole extracts the user's role string from the request context.
 //
 // Returns an error if the value is missing. The role is one of:
