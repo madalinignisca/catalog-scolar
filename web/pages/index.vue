@@ -189,14 +189,14 @@ function openClass(classItem: TeacherClass): void {
           </span>
         </div>
 
-        <!-- Student count -->
-        <p class="mt-2 text-sm text-gray-500">
-          <span data-testid="class-card-student-count" class="font-medium text-gray-700">{{ classItem.studentCount }}</span>
-          {{ classItem.studentCount === 1 ? 'elev' : 'elevi' }}
+        <!-- Student count (may come as studentCount or maxStudents depending on API) -->
+        <p v-if="classItem.studentCount || classItem.maxStudents" class="mt-2 text-sm text-gray-500">
+          <span data-testid="class-card-student-count" class="font-medium text-gray-700">{{ classItem.studentCount ?? classItem.maxStudents }}</span>
+          {{ (classItem.studentCount ?? classItem.maxStudents) === 1 ? 'elev' : 'elevi' }}
         </p>
 
-        <!-- Subjects the teacher teaches in this class -->
-        <div v-if="classItem.subjects.length > 0" class="mt-3">
+        <!-- Subjects the teacher teaches in this class (may not be loaded yet) -->
+        <div v-if="classItem.subjects?.length > 0" class="mt-3">
           <p class="mb-1 text-xs font-medium uppercase tracking-wide text-gray-400">Materii</p>
           <div class="flex flex-wrap gap-1.5">
             <span
