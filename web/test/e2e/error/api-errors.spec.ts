@@ -123,19 +123,13 @@ authTest(
 
 // ── Test 67 ───────────────────────────────────────────────────────────────────
 
-// FIXME: Marked as fixme because route interception + catalog SPA navigation +
-// modal interaction exceeds the 60s test timeout in sequential runs. The three
-// steps (intercept registration, full catalog load, modal open/save/assert)
-// together push past the deadline on a slow CI box. Will be fixed by splitting
-// navigation and interception into a more targeted setup or raising the timeout
-// selectively when the CI baseline improves.
-authTest.fixme(
+authTest(
   '67 – API 403 on grade creation shows an error message',
   async ({ teacherPage }) => {
-    // This test involves route interception + catalog navigation + modal
-    // interaction, all of which add latency on a slow CI box. 60 s gives
-    // the full sequence enough headroom without masking real regressions.
-    test.setTimeout(60_000);
+    // Give the full navigation + modal + assertion chain 90 seconds.
+    // The extra headroom avoids flaky failures on slow CI boxes without
+    // masking real regressions (the actual happy path is ~10–15 s locally).
+    test.setTimeout(90_000);
     /**
      * SCENARIO
      * ────────
@@ -153,34 +147,23 @@ authTest.fixme(
      *
      * IMPLEMENTATION
      * ──────────────
-     * We let the page load normally first (no intercept on the GET). After
-     * the grade grid is visible, we register an intercept on the POST endpoint
-     * and attempt to save a grade through the modal. The modal should show an
-     * error — either inline or as a toast notification.
+     * We register the POST intercept BEFORE navigating to the catalog page so
+     * it is already active when the grade-save request fires. Only POST
+     * requests are blocked — GET requests for the initial data load pass
+     * through normally. The sequence is:
+     *   1. Register intercept (early, before any navigation).
+     *   2. Navigate to catalog and let the grade grid load normally.
+     *   3. Open the modal, fill a grade, save.
+     *   4. Assert the error feedback is visible.
      */
     const catalogPage = new CatalogPage(teacherPage);
     const modal = new GradeInputModal(teacherPage);
 
-    // ── Navigate and wait for the grid to load normally ───────────────────────
-    // CatalogPage.goto() waits for dashboard-content and then clicks the class
-    // card. We must ensure the dashboard has fully loaded before calling goto()
-    // so the class card is interactable. We explicitly wait for dashboard-content
-    // here because teacherPage may still be in the initial loading state if this
-    // test runs right after the fixture setup.
-    await teacherPage.waitForURL('/', { timeout: 15_000 });
-    await teacherPage.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 15_000 });
-
-    await catalogPage.goto(TEST_CLASSES.class2A.id);
-    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
-    await catalogPage.clickSubjectTab('Comunicare');
-    // At least 1 student row must be visible (exact count depends on test order —
-    // a prior delete test may have removed all grades for one student, causing
-    // the API to return fewer rows than the original seed-data count of 2).
-    await expect(catalogPage.studentRows.first()).toBeVisible({ timeout: 8_000 });
-
-    // ── Now intercept only the POST grades endpoint ───────────────────────────
-    // We register the intercept after the page loaded so it only blocks
-    // the save request, not the initial data fetch.
+    // ── Step 1: Register the POST intercept EARLY ─────────────────────────────
+    // Setting up the route before navigation guarantees the handler is in place
+    // when the grade-save request fires, even if the catalog page's JavaScript
+    // bundles load faster than expected. GET requests (initial data fetch) still
+    // reach the real server because we call route.continue() for those.
     // The actual API URL from useCatalog.ts is POST /api/v1/catalog/grades,
     // so we use the pattern **/api/v1/catalog/grades to match any origin.
     await teacherPage.route('**/api/v1/catalog/grades', (route) => {
@@ -197,18 +180,33 @@ authTest.fixme(
       return route.continue();
     });
 
-    // ── Open the add-grade modal for Ioana Crișan ────────────────────────────
+    // ── Step 2: Navigate to catalog and wait for the grid to load normally ────
+    // The fixture lands the browser on the dashboard (/). We wait for the
+    // dashboard to stabilise before calling catalogPage.goto() so the class
+    // card is already in the DOM and interactable.
+    await teacherPage.waitForURL('/', { timeout: 15_000 });
+    await teacherPage.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 15_000 });
+
+    await catalogPage.goto(TEST_CLASSES.class2A.id);
+    await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
+    await catalogPage.clickSubjectTab('Comunicare');
+    // At least 1 student row must be visible (exact count depends on test order —
+    // a prior delete test may have removed all grades for one student, causing
+    // the API to return fewer rows than the original seed-data count of 2).
+    await expect(catalogPage.studentRows.first()).toBeVisible({ timeout: 8_000 });
+
+    // ── Step 3: Open the add-grade modal for Ioana Crișan ────────────────────
     // Mureșan has no seed grades so his row is not in the grid.
     // Crișan (seed grade B) is visible in the grid.
     await catalogPage.clickAddGrade('Crișan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
-    // ── Fill in a valid grade and attempt to save ─────────────────────────────
+    // ── Step 4: Fill in a valid grade and attempt to save ────────────────────
     await modal.selectQualifier('FB');
     await modal.setDate(todayISO());
     await modal.save();
 
-    // ── Assert an error message appears ──────────────────────────────────────
+    // ── Step 5: Assert an error message appears ───────────────────────────────
     // The UI must show some form of error feedback after the 403 response.
     // We check three common patterns:
     //   Pattern A — A dedicated grade-api-error element near the modal.
