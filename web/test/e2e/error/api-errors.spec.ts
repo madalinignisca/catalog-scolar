@@ -258,18 +258,26 @@ test(
      * unauthenticated scenario — no fixture login is required.
      */
 
-    // ── Intercept the login API call and abort it ─────────────────────────────
-    // 'timedout' is the Playwright abort reason that maps to a network timeout.
-    await page.route('**/auth/login', (route) => route.abort('timedout'));
-
-    // ── Navigate to the login page ────────────────────────────────────────────
+    // ── Navigate to the login page FIRST ───────────────────────────────────────
     await page.goto('/login');
 
-    // ── Fill in credentials ───────────────────────────────────────────────────
-    // We use real-looking credentials. The actual values do not matter because
-    // the request will be aborted before reaching the server.
+    // ── Wait for hydration so form handlers are attached ─────────────────────
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('#__nuxt');
+        return el != null && '__vue_app__' in el;
+      },
+      { timeout: 10_000 },
+    );
+
+    // ── Fill in credentials BEFORE setting up the intercept ──────────────────
+    // We fill first to ensure the form is ready, then intercept only the POST.
     await page.getByTestId('email-input').fill('ana.dumitrescu@scoala-rebreanu.ro');
     await page.getByTestId('password-input').fill('catalog2026');
+
+    // ── Intercept ONLY the login API POST and abort it ──────────────────────
+    // Use a specific pattern that only matches the API URL, not the page URL.
+    await page.route('**/api/v1/auth/login', (route) => route.abort('timedout'));
 
     // ── Submit the form ───────────────────────────────────────────────────────
     await page.getByTestId('submit-button').click();
