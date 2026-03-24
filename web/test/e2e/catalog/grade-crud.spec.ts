@@ -305,6 +305,12 @@ test(
     const initialBadgeCount = await targetRow.getByTestId('grade-badge').count();
     expect(initialBadgeCount).toBeGreaterThan(0); // row has at least 1 badge
 
+    // ── Set up dialog handler BEFORE clicking delete ────────────────────────
+    // The delete flow uses window.confirm() which creates a browser dialog.
+    // We must register the handler BEFORE the click that triggers it,
+    // otherwise the dialog fires and auto-dismisses before we can accept it.
+    teacherPage.on('dialog', (dialog) => void dialog.accept());
+
     // ── Try Pattern A: hover → delete icon on badge ───────────────────────────
     const gradeBadge = targetRow.getByTestId('grade-badge').first();
     await gradeBadge.hover();
@@ -314,36 +320,14 @@ test(
     const hoverDeleteVisible = await hoverDeleteButton.isVisible().catch(() => false);
 
     if (hoverDeleteVisible) {
-      // Pattern A: a delete button appeared on hover.
       await hoverDeleteButton.click();
     } else {
       // ── Pattern B: open modal, use modal delete button ────────────────────
       await gradeBadge.click();
       await expect(modal.modal).toBeVisible({ timeout: 5_000 });
-
-      // Look for a delete button inside the modal.
       const modalDeleteButton = teacherPage.getByTestId('grade-delete-button');
       await expect(modalDeleteButton).toBeVisible({ timeout: 3_000 });
       await modalDeleteButton.click();
-    }
-
-    // ── Handle confirmation dialog ────────────────────────────────────────────
-    // Some implementations show a browser confirm() dialog; others use a
-    // custom in-page confirmation element.
-    const dialogPromise = teacherPage.waitForEvent('dialog', { timeout: 2_000 }).catch(() => null);
-    const dialog = await dialogPromise;
-    if (dialog) {
-      // Accept the confirmation dialog (equivalent to clicking "OK").
-      await dialog.accept();
-    } else {
-      // Look for an in-page confirm button (e.g. "Da, șterge" / "Confirm").
-      const confirmButton = teacherPage
-        .getByTestId('confirm-delete-button')
-        .or(teacherPage.getByRole('button', { name: /confirm|șterg|da/i }));
-      const confirmVisible = await confirmButton.isVisible({ timeout: 2_000 }).catch(() => false);
-      if (confirmVisible) {
-        await confirmButton.click();
-      }
     }
 
     // ── Verify badge count decreased by 1 ─────────────────────────────────────
