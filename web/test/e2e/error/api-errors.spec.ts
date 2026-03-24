@@ -123,9 +123,7 @@ authTest(
 
 // ── Test 67 ───────────────────────────────────────────────────────────────────
 
-// FIXME: Route intercept + SPA catalog navigation + modal + sync engine interaction
-// exceeds 90s timeout. Needs /sync/push endpoint or simplified test path.
-authTest.fixme(
+authTest(
   '67 – API 403 on grade creation shows an error message',
   async ({ teacherPage }) => {
     // Give the full navigation + modal + assertion chain 90 seconds.
