@@ -240,7 +240,8 @@ function selectSemester(semester: Semester): void {
         <p class="mt-0.5 text-sm text-gray-500">
           <span data-testid="education-level-badge">{{ educationLevelLabels[currentClass.educationLevel] ?? currentClass.educationLevel }}</span>
           &middot;
-          <span data-testid="catalog-student-count">{{ currentClass.studentCount }} {{ currentClass.studentCount === 1 ? 'elev' : 'elevi' }}</span>
+          <!-- studentCount may not be present in all API responses — guard with optional chaining -->
+          <span v-if="currentClass.studentCount != null" data-testid="catalog-student-count">{{ currentClass.studentCount }} {{ currentClass.studentCount === 1 ? 'elev' : 'elevi' }}</span>
         </p>
       </div>
 

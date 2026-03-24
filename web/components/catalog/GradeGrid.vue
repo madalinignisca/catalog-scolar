@@ -113,9 +113,12 @@ watch(
  */
 const sortedStudents = computed<StudentWithGrades[]>(() => {
   return [...gradeGrid.value].sort((a, b) => {
-    const lastNameCompare = a.lastName.localeCompare(b.lastName, 'ro');
+    /* Use || '' to guard against missing names from partial API responses.
+     * The TypeScript type says these are non-optional, but the runtime API
+     * may omit them if a student record is incomplete. */
+    const lastNameCompare = (a.lastName || '').localeCompare(b.lastName || '', 'ro');
     if (lastNameCompare !== 0) return lastNameCompare;
-    return a.firstName.localeCompare(b.firstName, 'ro');
+    return (a.firstName || '').localeCompare(b.firstName || '', 'ro');
   });
 });
 
@@ -207,12 +210,14 @@ function gradeBadgeClasses(grade: Grade): string {
  * @returns A tooltip string like "15.10.2026 — Test la capitolul 3"
  */
 function gradeTooltip(grade: Grade): string {
-  /* Format date from ISO (2026-10-15) to Romanian format (15.10.2026) */
-  const parts = grade.gradeDate.split('-');
+  /* Format date from ISO (2026-10-15) to Romanian format (15.10.2026).
+   * Use || '' to guard against missing gradeDate from partial API responses. */
+  const rawDate = grade.gradeDate || '';
+  const parts = rawDate.split('-');
   const day = parts[2] ?? '';
   const month = parts[1] ?? '';
   const year = parts[0] ?? '';
-  const formattedDate = parts.length === 3 ? `${day}.${month}.${year}` : grade.gradeDate;
+  const formattedDate = parts.length === 3 ? `${day}.${month}.${year}` : rawDate;
 
   if (grade.description !== null && grade.description !== '') {
     return `${formattedDate} — ${grade.description}`;
@@ -502,7 +507,7 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 </div>
 
                 <!-- Empty state: no grades yet for this student -->
-                <span v-if="student.grades.length === 0" class="text-xs italic text-gray-400">
+                <span v-if="!student.grades || student.grades.length === 0" class="text-xs italic text-gray-400">
                   Nicio notă
                 </span>
               </div>

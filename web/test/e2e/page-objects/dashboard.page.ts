@@ -163,7 +163,8 @@ export class DashboardPage {
   getClassCardStudentCount(card: Locator): Locator {
     // Scoped lookup — avoids false matches from other student-count elements
     // on the page if multiple cards are rendered.
-    return card.getByTestId('student-count');
+    // Template uses data-testid="class-card-student-count" (not "student-count").
+    return card.getByTestId('class-card-student-count');
   }
 
   // ── Interaction ────────────────────────────────────────────────────────────
