@@ -161,7 +161,9 @@ authTest(
     // ── Now intercept only the POST grades endpoint ───────────────────────────
     // We register the intercept after the page loaded so it only blocks
     // the save request, not the initial data fetch.
-    await teacherPage.route('**/catalog/grades', (route) => {
+    // The actual API URL from useCatalog.ts is POST /api/v1/catalog/grades,
+    // so we use the pattern **/api/v1/catalog/grades to match any origin.
+    await teacherPage.route('**/api/v1/catalog/grades', (route) => {
       // Only intercept POST requests (the grade creation method).
       // GET requests to the same base path should still pass through.
       if (route.request().method() === 'POST') {

@@ -77,20 +77,34 @@ test(
      * We do NOT assert the exact text of the empty state message — that is
      * a copy/UX decision. We only verify that some element exists to fill
      * the blank space.
+     *
+     * TIMING NOTE: We wait for [data-testid="dashboard-content"] to be visible
+     * first. This guarantees the async /classes fetch has completed and the
+     * dashboard has settled into its final state before we assert anything.
+     * Without this wait, the empty-state element check may run before the
+     * Vue component has finished rendering the no-classes branch.
      */
 
     // ── Verify we are on the dashboard ────────────────────────────────────────
     // The fixture logs in as Dan Pavel and lands on '/'.
-    await unassignedTeacherPage.waitForURL('/', { timeout: 10_000 });
+    await unassignedTeacherPage.waitForURL('/', { timeout: 15_000 });
+
+    // ── Wait for the dashboard content area to be visible ─────────────────────
+    // dashboard-content is rendered after the async /classes API call resolves.
+    // For an unassigned teacher this call returns an empty array — but it still
+    // must complete before the empty state element appears. We wait here to
+    // prevent asserting against a partially rendered state.
+    await expect(
+      unassignedTeacherPage.getByTestId('dashboard-content'),
+    ).toBeVisible({ timeout: 15_000 });
 
     // ── Assert no class cards are shown ──────────────────────────────────────
     // [data-testid="class-card"] is the element rendered for each assigned class.
     // For an unassigned teacher there should be zero such elements.
     const classCards = unassignedTeacherPage.getByTestId('class-card');
 
-    // Wait briefly for the dashboard to finish loading (in case cards are
-    // rendered asynchronously from an API call).
-    // We use a count assertion with a timeout to detect cards if they appear.
+    // Now that dashboard-content is visible we can assert the card count.
+    // Zero class cards means the v-for loop rendered nothing — expected.
     await expect(classCards).toHaveCount(0, { timeout: 8_000 });
 
     // ── Assert an empty state / informational element is visible ──────────────
@@ -98,7 +112,6 @@ test(
     // We check for two common element patterns and accept either:
     //   Pattern A — A dedicated [data-testid="empty-state"] element.
     //   Pattern B — A [data-testid="dashboard-empty-message"] element.
-    //   Pattern C — Any element containing text that indicates emptiness.
     //
     // We use .or() to accept any of the first two patterns without coupling
     // the test to a specific testid name.
@@ -109,9 +122,7 @@ test(
     // If neither testid exists, the test will fail — prompting the developer
     // to add an empty state to the teacher dashboard component.
     const emptyState = emptyStateA.or(emptyStateB);
-    // Allow up to 15 seconds — the dashboard may show a loading spinner before
-    // the empty state becomes visible after the fixture-based login.
-    await expect(emptyState).toBeVisible({ timeout: 15_000 });
+    await expect(emptyState).toBeVisible({ timeout: 8_000 });
   },
 );
 

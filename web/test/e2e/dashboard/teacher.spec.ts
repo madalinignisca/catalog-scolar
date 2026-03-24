@@ -66,12 +66,23 @@ test(
      * We inspect the first card's inner elements one by one.
      * Each inner locator is scoped *inside* the card, so there is no risk
      * of accidentally matching a different card's content.
+     *
+     * TIMING NOTE: We wait for the first class card itself to be visible
+     * (not just the outer content container) before reading its children.
+     * The dashboard renders the content wrapper before the async API call
+     * for classes completes, so `dashboard.content` being visible does NOT
+     * guarantee that the class cards inside it are populated yet.
      */
     const dashboard = new DashboardPage(teacherPage);
 
     // Ensure content has loaded before reading card contents.
     // Allow up to 15 seconds for the dashboard to finish its async data fetch.
     await expect(dashboard.content).toBeVisible({ timeout: 15_000 });
+
+    // Wait for the first class card to actually appear inside the content area.
+    // This guards against reading an empty card list before the /classes API
+    // response has been processed and the v-for loop has rendered the cards.
+    await expect(dashboard.classCards.first()).toBeVisible({ timeout: 15_000 });
 
     // Grab the first (and only) class card as a scoped locator.
     const firstCard = dashboard.classCards.first();

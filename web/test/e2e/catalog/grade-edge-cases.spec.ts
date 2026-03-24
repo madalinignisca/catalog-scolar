@@ -258,13 +258,16 @@ test(
      * save a grade by only filling the required fields (qualifier + date for
      * primary school, or numeric grade + date for middle school).
      *
-     * We test this with the primary-school teacher (Ana Dumitrescu, class 2A)
-     * by:
-     *   1. Opening the add-grade modal for Matei Mureșan (no seed grades).
-     *   2. Selecting qualifier "B" without filling the description.
-     *   3. Setting today's date.
-     *   4. Saving.
-     *   5. Verifying the grade badge appears and no error is shown.
+     * We test this with the primary-school teacher (Ana Dumitrescu, class 2A).
+     * We open the add-grade modal for Andrei Moldovan (always visible in the
+     * grid because CRUD tests never delete ALL of his grades), select qualifier
+     * "FB" without filling the description, save, and verify the modal closes
+     * cleanly and a grade badge is present in Moldovan's row.
+     *
+     * We do NOT assert the first badge's exact text (prior CRUD tests may have
+     * mutated Moldovan's grades). Instead we assert that:
+     *   1. The total badge count in Moldovan's row is greater after the save.
+     *   2. No error banner or validation error appears.
      *
      * The description textarea should be present in the modal but left empty.
      * This guards against a regression where the form treats the optional
@@ -276,19 +279,20 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    // API returns only students with grades: 2 rows in seed data.
-    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
+    // Wait for at least 1 row — Moldovan always has grades in the grid.
+    await expect(catalogPage.studentRows.first()).toBeVisible({ timeout: 8_000 });
 
-    // Open the add-grade modal for Ioana Crișan (has seed grade B, row is
-    // visible). Mureșan has no grades so his row is not rendered by the API.
-    // We use "Crișan" and fall back to "Crisan" for ASCII-only environments.
-    const muresanRow = catalogPage.getStudentRowByName('Crișan').or(
-      catalogPage.getStudentRowByName('Crisan'),
-    );
-    await expect(muresanRow).toBeVisible();
+    // Target Moldovan's row — he always has at least one grade (seed + test 51).
+    // Crișan's row may be absent if test 54 deleted her only grade.
+    const moldovanRow = catalogPage.getStudentRowByName('Moldovan');
+    await expect(moldovanRow).toBeVisible();
 
-    // Click the add-grade button inside Crișan's row.
-    await muresanRow.getByTestId('add-grade-button').click();
+    // Record how many badges Moldovan has BEFORE the save so we can verify
+    // that the count increased by 1 after saving without a description.
+    const badgesBefore = await moldovanRow.getByTestId('grade-badge').count();
+
+    // Click the add-grade button inside Moldovan's row.
+    await moldovanRow.getByTestId('add-grade-button').click();
 
     // ── Modal opens ───────────────────────────────────────────────────────────
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
@@ -303,8 +307,8 @@ test(
     expect(descriptionValue).toBe('');
 
     // ── Fill only the required fields ─────────────────────────────────────────
-    // Select qualifier "B" (Bine / Good). No description is filled.
-    await modal.selectQualifier('B');
+    // Select qualifier "FB" (Foarte Bine). No description is filled.
+    await modal.selectQualifier('FB');
 
     // Set today's date — the only other required field.
     await modal.setDate(todayISO());
@@ -324,11 +328,16 @@ test(
     // v-if, so it is absent from the DOM when there is no error).
     await expect(modal.validationError).not.toBeVisible();
 
-    // ── Grade badge appears in the student's row ───────────────────────────────
-    // Ioana Crișan's row should now show an additional "B" grade badge.
-    const muresanBadges = muresanRow.getByTestId('grade-badge');
-    await expect(muresanBadges.first()).toBeVisible({ timeout: 5_000 });
-    await expect(muresanBadges.first()).toContainText('B');
+    // ── Grade badge count increased in Moldovan's row ──────────────────────────
+    // After saving without a description, the badge count must be exactly
+    // badgesBefore + 1. We do not assert the exact text of any specific badge
+    // because earlier tests may have mutated the order of badges in the row.
+    const badgesAfter = await moldovanRow.getByTestId('grade-badge').count();
+    expect(
+      badgesAfter,
+      `Expected badge count to increase from ${String(badgesBefore)} to ${String(badgesBefore + 1)} ` +
+        `after saving a grade without a description. Got: ${String(badgesAfter)}`,
+    ).toBe(badgesBefore + 1);
 
     // ── No error banner on the page ───────────────────────────────────────────
     // A page-level error banner would indicate an API or server-side failure.

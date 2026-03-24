@@ -63,23 +63,28 @@ test(
      *
      * Conversely, the hamburger toggle button must be visible so the user has
      * a way to open the navigation menu.
+     *
+     * TIMING NOTE: The fixture logs in at the default viewport size, then
+     * test.use() applies the 375 px viewport. We wait for the hamburger to
+     * be visible before checking the sidebar, but we also wait for the
+     * sidebar to reach its hidden state (CSS transition may be in progress)
+     * using toBeHidden() which polls until the element is no longer visible.
      */
     const layout = new LayoutPage(teacherPage);
 
-    // Wait for the page to fully render before checking visibility.
-    // We wait for the mobile menu button specifically, as it is the
-    // element that must appear on mobile. Allow 15 s for the fixture-based
-    // login to complete and the page content to finish loading.
+    // Wait for the mobile menu button to appear. This confirms the page has
+    // rendered at the mobile viewport and the Nuxt hydration is complete.
+    // Allow 15 s for the fixture-based login to complete.
     await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
 
     // ── Sidebar should be hidden ──────────────────────────────────────────────
-    // isSidebarVisible() calls Playwright's isVisible() on the sidebar locator.
-    // At mobile widths the sidebar must NOT be visible before the menu is opened.
-    const sidebarVisible = await layout.isSidebarVisible();
-    expect(
-      sidebarVisible,
+    // Use toBeHidden() instead of a synchronous isVisible() call so the
+    // assertion actively polls and waits out any CSS slide-out animation.
+    // At mobile widths the sidebar must NOT be visible before the menu opens.
+    await expect(
+      layout.sidebar,
       'Sidebar should be hidden on mobile before the menu is opened',
-    ).toBe(false);
+    ).toBeHidden({ timeout: 5_000 });
 
     // ── Hamburger must be visible ─────────────────────────────────────────────
     // isHamburgerVisible() calls isVisible() on [data-testid="mobile-menu-button"].
@@ -148,9 +153,10 @@ test(
      *
      * Test flow:
      *   1. Open the sidebar via the hamburger button.
-     *   2. Wait for the sidebar to be visible (drawer is fully open).
+     *   2. Wait for BOTH the sidebar AND the overlay to be fully visible
+     *      (drawer is completely open — no mid-animation race).
      *   3. Click the overlay via closeMobileMenu().
-     *   4. Assert the sidebar is no longer visible.
+     *   4. Assert the sidebar is no longer visible (with timeout for animation).
      *
      * closeMobileMenu() clicks [data-testid="sidebar-overlay"]. After the
      * click, Nuxt removes or hides the drawer via v-if / CSS transition.
@@ -163,19 +169,22 @@ test(
     await layout.openMobileMenu();
 
     // ── Step 2: Wait for the drawer to be fully open ──────────────────────────
-    // We wait explicitly so we are not racing the open animation.
-    await expect(layout.sidebar).toBeVisible();
+    // Wait for BOTH the sidebar AND the overlay to be visible before clicking.
+    // This prevents a race where we click the overlay before it finishes
+    // rendering (v-if transition) and the click lands on an empty area.
+    await expect(layout.sidebar).toBeVisible({ timeout: 5_000 });
+    await expect(layout.sidebarOverlay).toBeVisible({ timeout: 5_000 });
 
     // ── Step 3: Click the overlay to close ───────────────────────────────────
     await layout.closeMobileMenu();
 
     // ── Step 4: Sidebar must be hidden again ──────────────────────────────────
-    // toBeHidden() is the inverse of toBeVisible() and waits for the element
-    // to disappear (transition out) rather than asserting synchronously.
+    // Use toBeHidden() with an explicit timeout to wait out the CSS close
+    // animation before the assertion resolves.
     await expect(
       layout.sidebar,
       'Sidebar drawer should be hidden after clicking the overlay',
-    ).toBeHidden();
+    ).toBeHidden({ timeout: 5_000 });
   },
 );
 
@@ -193,12 +202,13 @@ test(
      * WHY "Absențe"?
      * We pick the absences route because it is the only nav item whose URL
      * (/absences) differs from the root ("/") used by both dashboard and
-     * catalog items.  This makes the navigation assertion unambiguous.
+     * catalog items. This makes the navigation assertion unambiguous.
      *
-     * clickNavItem(label) uses a partial-text filter so it matches "Absențe"
-     * even if the label includes an icon character or trailing whitespace.
-     * The regex /absen/i in the filter covers both the diacritic form
-     * "Absențe" and the ASCII fallback "Absente".
+     * TIMING NOTE: We must wait for the nav items inside the drawer to be
+     * interactable before clicking. The sidebar uses a CSS slide-in animation;
+     * if we click a nav item while the animation is mid-way, the click may
+     * miss or land on the overlay instead of the link. We wait for the first
+     * nav item to be visible inside the open sidebar before clicking.
      */
     const layout = new LayoutPage(teacherPage);
 
@@ -207,8 +217,11 @@ test(
     await expect(layout.mobileMenuButton).toBeVisible({ timeout: 15_000 });
     await layout.openMobileMenu();
 
-    // Wait for the drawer to open before interacting with nav items inside it.
-    await expect(layout.sidebar).toBeVisible();
+    // Wait for the drawer to be fully open AND for the nav items inside it to
+    // be interactable. We check the first nav item's visibility with a timeout
+    // to account for the CSS slide-in animation completing.
+    await expect(layout.sidebar).toBeVisible({ timeout: 5_000 });
+    await expect(layout.navItems.first()).toBeVisible({ timeout: 5_000 });
 
     // ── Step 2: Click the Absențe nav item ───────────────────────────────────
     // We use a regex-safe partial label that handles both "Absențe" (with ț)
@@ -218,11 +231,12 @@ test(
     await layout.navItems.filter({ hasText: /absen/i }).click();
 
     // ── Step 3: Assert navigation to /absences ────────────────────────────────
-    // waitForURL waits up to 10 s for the Nuxt router to complete navigation.
-    // This is generous to account for route transition animations on mobile.
-    await teacherPage.waitForURL('/absences', { timeout: 10_000 });
+    // waitForURL waits up to 15 s for the Nuxt router to complete navigation.
+    // The generous timeout accounts for route transition animations on mobile
+    // and potential CI environment slowness.
+    await teacherPage.waitForURL('**/absences', { timeout: 15_000 });
 
-    // Final synchronous confirmation: the URL must end with /absences.
+    // Final synchronous confirmation: the URL must contain /absences.
     expect(teacherPage.url()).toContain('/absences');
   },
 );

@@ -96,12 +96,17 @@ test.describe('access control', () => {
     // Parents are NOT assigned as teachers or class managers for any class.
     const catalogPage = new CatalogPage(parentPage);
 
-    // Navigate to class 2A's catalog page.
-    // Even though Ion's child is in class 2A, the catalog route is for teachers.
-    await catalogPage.goto('f1000000-0000-0000-0000-000000000001');
+    // Navigate directly to class 2A's catalog URL using page.goto() rather than
+    // CatalogPage.goto(). We MUST use page.goto() here because:
+    //   - CatalogPage.goto() works by clicking a class card on the dashboard.
+    //   - The parent's dashboard has NO class cards (parents have no assignments).
+    //   - Clicking a non-existent card would throw "No class card found".
+    // Using page.goto() simulates a parent who typed or bookmarked the URL
+    // directly — the exact scenario this access-control test covers.
+    await parentPage.goto('/catalog/f1000000-0000-0000-0000-000000000001');
 
     // Wait for the page to finish loading (loading spinner gone or content appears).
-    // We give 10 seconds to account for API latency.
+    // We give 10 seconds to account for API latency and any SSR redirect.
     await parentPage
       .getByTestId('catalog-loading')
       .waitFor({ state: 'hidden', timeout: 10_000 })
@@ -249,9 +254,14 @@ test.describe('access control', () => {
     // `teacherPage` is logged in as Ana Dumitrescu (role: teacher, class 2A).
     const catalogPage = new CatalogPage(teacherPage);
 
-    // Navigate to class 6B — Ana is NOT assigned to this class.
-    // class 6B ID: f1000000-0000-0000-0000-000000000002
-    await catalogPage.goto('f1000000-0000-0000-0000-000000000002');
+    // Navigate directly to class 6B's catalog URL using page.goto() rather than
+    // CatalogPage.goto(). We MUST use page.goto() here because:
+    //   - CatalogPage.goto() works by clicking a class card on the dashboard.
+    //   - Ana only has ONE card (class 2A). Clicking it navigates to 2A, NOT 6B.
+    //   - waitForURL('**/catalog/f1000000-...-000000000002') would then time out.
+    // Using page.goto() simulates Ana manually typing the URL for a class she
+    // is not assigned to — the exact scenario this RLS test covers.
+    await teacherPage.goto('/catalog/f1000000-0000-0000-0000-000000000002');
 
     // Wait for the page to finish loading.
     await teacherPage
