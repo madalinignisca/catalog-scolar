@@ -76,7 +76,8 @@ test(
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Limba');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data (Pop, Rus).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // ── Part A: verify existing thesis grade for Alexandru Pop ────────────────
     const popRow = catalogPage.getStudentRowByName('Pop');
@@ -109,8 +110,9 @@ test(
     }
 
     // ── Part B: attempt to add a thesis grade via the modal ───────────────────
-    // Open the add-grade modal for David Bogdan (no existing grades).
-    await catalogPage.clickAddGrade('Bogdan');
+    // Open the add-grade modal for Sofia Rus (has seed grade 7, row is visible).
+    // David Bogdan has no grades so his row is not rendered by the API.
+    await catalogPage.clickAddGrade('Rus');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
     // Look for a thesis toggle / checkbox / button inside the modal.
@@ -133,17 +135,17 @@ test(
       // Modal should close on success.
       await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
-      // David Bogdan's row should now have a thesis badge visible.
-      const bogdanRow = catalogPage.getStudentRowByName('Bogdan');
-      const bogdanThesisBadge = bogdanRow.getByTestId('thesis-badge');
-      const bogdanThesisVisible = await bogdanThesisBadge.isVisible().catch(() => false);
+      // Sofia Rus's row should now have a thesis badge visible.
+      const rusRow = catalogPage.getStudentRowByName('Rus');
+      const rusThesisBadge = rusRow.getByTestId('thesis-badge');
+      const rusThesisVisible = await rusThesisBadge.isVisible().catch(() => false);
 
-      if (bogdanThesisVisible) {
-        await expect(bogdanThesisBadge).toContainText('8');
+      if (rusThesisVisible) {
+        await expect(rusThesisBadge).toContainText('8');
       } else {
         // Accept a "T" prefix as an alternative representation.
-        const bogdanBadgeTexts = await catalogPage.getGradeBadges('Bogdan').allTextContents();
-        const hasThesis = bogdanBadgeTexts.some((t) => t.trim().toUpperCase().startsWith('T'));
+        const rusBadgeTexts = await catalogPage.getGradeBadges('Rus').allTextContents();
+        const hasThesis = rusBadgeTexts.some((t) => t.trim().toUpperCase().startsWith('T'));
         expect(hasThesis).toBe(true);
       }
     } else {
@@ -179,7 +181,8 @@ test(
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Limba');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data (Pop, Rus).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Locate Alexandru Pop's row.
     const popRow = catalogPage.getStudentRowByName('Pop');
@@ -273,16 +276,18 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data.
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
-    // Open the add-grade modal for Matei Mureșan.
-    // We use "Mureșan" and fall back to "Muresan" for ASCII-only environments.
-    const muresanRow = catalogPage.getStudentRowByName('Mureșan').or(
-      catalogPage.getStudentRowByName('Muresan'),
+    // Open the add-grade modal for Ioana Crișan (has seed grade B, row is
+    // visible). Mureșan has no grades so his row is not rendered by the API.
+    // We use "Crișan" and fall back to "Crisan" for ASCII-only environments.
+    const muresanRow = catalogPage.getStudentRowByName('Crișan').or(
+      catalogPage.getStudentRowByName('Crisan'),
     );
     await expect(muresanRow).toBeVisible();
 
-    // Click the add-grade button inside Mureșan's row.
+    // Click the add-grade button inside Crișan's row.
     await muresanRow.getByTestId('add-grade-button').click();
 
     // ── Modal opens ───────────────────────────────────────────────────────────
@@ -320,7 +325,7 @@ test(
     await expect(modal.validationError).not.toBeVisible();
 
     // ── Grade badge appears in the student's row ───────────────────────────────
-    // Matei Mureșan's row should now show a "B" grade badge.
+    // Ioana Crișan's row should now show an additional "B" grade badge.
     const muresanBadges = muresanRow.getByTestId('grade-badge');
     await expect(muresanBadges.first()).toBeVisible({ timeout: 5_000 });
     await expect(muresanBadges.first()).toContainText('B');

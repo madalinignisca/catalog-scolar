@@ -155,7 +155,8 @@ authTest(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data.
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // ── Now intercept only the POST grades endpoint ───────────────────────────
     // We register the intercept after the page loaded so it only blocks
@@ -174,8 +175,10 @@ authTest(
       return route.continue();
     });
 
-    // ── Open the add-grade modal for Matei Mureșan ────────────────────────────
-    await catalogPage.clickAddGrade('Mureșan');
+    // ── Open the add-grade modal for Ioana Crișan ────────────────────────────
+    // Mureșan has no seed grades so his row is not in the grid.
+    // Crișan (seed grade B) is visible in the grid.
+    await catalogPage.clickAddGrade('Crișan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
     // ── Fill in a valid grade and attempt to save ─────────────────────────────

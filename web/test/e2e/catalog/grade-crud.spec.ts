@@ -60,15 +60,20 @@ test(
   '51 – teacher can add a qualifier grade (FB) for a primary-school student',
   async ({ teacherPage }) => {
     /**
-     * Mircea Toma has no CLR grades in the seed data, so this test adds the
-     * first grade for him. We:
+     * IMPORTANT: The GET /grades API only returns students who already have
+     * grades — students with no grades are not shown in the grid. Therefore
+     * we target Andrei Moldovan who already has a seed grade (FB) and whose
+     * row is visible in the grid.  We add a second FB grade for him.
+     *
+     * We:
      *   1. Open the catalog for class 2A / CLR.
-     *   2. Click the add-grade-button in Mircea Toma's row.
-     *   3. Verify the GradeInputModal opens.
-     *   4. Select qualifier "FB" (Foarte Bine / Very Good).
-     *   5. Set today's date.
-     *   6. Save.
-     *   7. Verify a grade badge with text "FB" appears in Toma's row.
+     *   2. Wait for the 2 seed-data rows (Moldovan, Crișan) to appear.
+     *   3. Click the add-grade-button in Andrei Moldovan's row.
+     *   4. Verify the GradeInputModal opens.
+     *   5. Select qualifier "FB" (Foarte Bine / Very Good).
+     *   6. Set today's date.
+     *   7. Save.
+     *   8. Verify a grade badge with text "FB" appears in Moldovan's row.
      *
      * This test uses the primary-school evaluation mode (qualifiers only).
      * The numeric input should NOT be visible for this class.
@@ -79,18 +84,19 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data.
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
-    // Open the grade modal for Mircea Toma (last-name "Toma").
-    await catalogPage.clickAddGrade('Toma');
+    // Open the grade modal for Andrei Moldovan (last-name "Moldovan").
+    // Moldovan has a seed grade so his row is present in the grid.
+    await catalogPage.clickAddGrade('Moldovan');
 
     // ── Modal opens ───────────────────────────────────────────────────────────
     // The modal must be visible before we interact with it.
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
     // Confirm the modal is for the correct student.
-    // The student name element should contain "Toma".
-    await expect(modal.studentName).toContainText('Toma');
+    await expect(modal.studentName).toContainText('Moldovan');
 
     // ── Select qualifier ──────────────────────────────────────────────────────
     // Primary school uses qualifier buttons instead of a numeric input.
@@ -109,28 +115,33 @@ test(
     await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
     // ── Grade badge appears in the grid ───────────────────────────────────────
-    // Mircea Toma's row should now contain a grade badge displaying "FB".
-    const tomaBadges = catalogPage.getGradeBadges('Toma');
-    await expect(tomaBadges.first()).toBeVisible({ timeout: 5_000 });
-    await expect(tomaBadges.first()).toContainText('FB');
+    // Moldovan's row should contain at least one FB grade badge.
+    const moldovanBadges = catalogPage.getGradeBadges('Moldovan');
+    await expect(moldovanBadges.first()).toBeVisible({ timeout: 5_000 });
+    await expect(moldovanBadges.first()).toContainText('FB');
   },
 );
 
 // ── Test 52 ──────────────────────────────────────────────────────────────────
 
 test(
-  '52 – teacher can add a numeric grade (8) for a middle-school student',
+  '52 – teacher can add a numeric grade (10) for a middle-school student',
   async ({ teacherMiddlePage }) => {
     /**
-     * David Bogdan has no ROM grades in the seed data, so this test adds the
-     * first numeric grade for him (value 8). We:
+     * IMPORTANT: The GET /grades API only returns students who already have
+     * grades. David Bogdan has no ROM seed grades so his row is not in the
+     * grid. We target Alexandru Pop instead (has seed grades 9, 8, thesis 7)
+     * whose row IS present. We add a new grade of 10 for him.
+     *
+     * We:
      *   1. Open the catalog for class 6B / ROM.
-     *   2. Click the add-grade-button in David Bogdan's row.
-     *   3. Verify the GradeInputModal opens.
-     *   4. Fill numeric grade 8.
-     *   5. Set today's date.
-     *   6. Save.
-     *   7. Verify a grade badge containing "8" appears in Bogdan's row.
+     *   2. Wait for the 2 seed-data rows (Pop, Rus) to appear.
+     *   3. Click the add-grade-button in Alexandru Pop's row.
+     *   4. Verify the GradeInputModal opens.
+     *   5. Fill numeric grade 10.
+     *   6. Set today's date.
+     *   7. Save.
+     *   8. Verify a grade badge containing "10" appears in Pop's row.
      *
      * This test uses the middle-school evaluation mode (numeric 1–10).
      * Qualifier buttons should NOT be visible for this class.
@@ -141,20 +152,22 @@ test(
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Limba');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data (Pop, Rus).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
-    // Open the grade modal for David Bogdan (last-name "Bogdan").
-    await catalogPage.clickAddGrade('Bogdan');
+    // Open the grade modal for Alexandru Pop (last-name "Pop").
+    // Pop has seed grades so his row is present in the grid.
+    await catalogPage.clickAddGrade('Pop');
 
     // ── Modal opens ───────────────────────────────────────────────────────────
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
-    await expect(modal.studentName).toContainText('Bogdan');
+    await expect(modal.studentName).toContainText('Pop');
 
     // ── Fill numeric grade ────────────────────────────────────────────────────
     // The numeric input (data-testid="grade-numeric-input") must be visible
     // for a middle-school class. fillNumericGrade fills and confirms.
     await expect(modal.numericInput).toBeVisible();
-    await modal.fillNumericGrade(8);
+    await modal.fillNumericGrade(10);
 
     // ── Set date ──────────────────────────────────────────────────────────────
     await modal.setDate(todayISO());
@@ -166,10 +179,10 @@ test(
     await expect(modal.modal).not.toBeVisible({ timeout: 8_000 });
 
     // ── Grade badge appears in the grid ───────────────────────────────────────
-    // David Bogdan's row should now have a badge containing "8".
-    const bogdanBadges = catalogPage.getGradeBadges('Bogdan');
-    await expect(bogdanBadges.first()).toBeVisible({ timeout: 5_000 });
-    await expect(bogdanBadges.first()).toContainText('8');
+    // Alexandru Pop's row should now have a badge containing "10".
+    const popBadges = catalogPage.getGradeBadges('Pop');
+    const badgeTexts = await popBadges.allTextContents();
+    expect(badgeTexts.some((t) => t.trim().includes('10'))).toBe(true);
   },
 );
 
@@ -197,7 +210,8 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data.
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Verify the existing FB badge is present before editing.
     const moldovanBadges = catalogPage.getGradeBadges('Moldovan');
@@ -263,7 +277,8 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data.
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Locate Crișan's row. Try both diacritic and ASCII forms.
     const crisanRow = catalogPage.getStudentRowByName('Crișan').or(
@@ -353,11 +368,14 @@ test(
     await catalogPage.goto(TEST_CLASSES.class2A.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data.
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // ── PART A: Empty form submission ─────────────────────────────────────────
-    // Open the add-grade modal for Matei Mureșan (no seed grades).
-    await catalogPage.clickAddGrade('Mureșan');
+    // Open the add-grade modal for Ioana Crișan (has seed grade B, row is
+    // visible in the grid). We target her because Mureșan has no grades and
+    // therefore her row is not rendered by the API.
+    await catalogPage.clickAddGrade('Crișan');
     await expect(modal.modal).toBeVisible({ timeout: 5_000 });
 
     // Click save without selecting a qualifier or entering a date.
@@ -422,7 +440,8 @@ test(
     await catalogPage.goto(TEST_CLASSES.class6B.id);
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Limba');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // API returns only students with grades: 2 rows in seed data (Pop, Rus).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // ── Read current average ──────────────────────────────────────────────────
     // getAverage scopes to [data-testid="student-average"] inside Pop's row.

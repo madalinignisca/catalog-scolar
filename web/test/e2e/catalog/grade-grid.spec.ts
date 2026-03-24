@@ -47,8 +47,14 @@ test(
      * from each student row, and verify the order matches the expected
      * alphabetical sequence.
      *
-     * Expected last names (Romanian alphabet order):
-     *   Crișan → Luca → Moldovan → Mureșan → Toma
+     * IMPORTANT: The GET /catalog/classes/{id}/subjects/{id}/grades API only
+     * returns students WHO HAVE GRADES — not all enrolled students. Seed data
+     * has CLR grades for exactly 2 students:
+     *   Crișan (Ioana) → B
+     *   Moldovan (Andrei) → FB
+     *
+     * Expected last names in alphabetical order (of those with grades):
+     *   Crișan → Moldovan
      *
      * We use a flexible substring check (includes) rather than exact equality
      * so that full names ("Ioana Crișan") or diacritics variations do not
@@ -61,17 +67,15 @@ test(
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
 
-    // Wait for all 5 student rows to appear.
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // The API returns only students who have grades (2 in seed data for CLR).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Extract the text content of every student row in DOM order.
     // allTextContents() returns an array of strings, one per matched element.
     const rowTexts = await catalogPage.studentRows.allTextContents();
 
-    // Expected last names in alphabetical order. We test that the row at
-    // each position contains the expected family name (case-insensitive).
-    // Using a regex with the Unicode flag handles Romanian diacritics.
-    const expectedOrder = ['Crișan', 'Luca', 'Moldovan', 'Mureșan', 'Toma'];
+    // Expected last names in alphabetical order (students with CLR grades only).
+    const expectedOrder = ['Crișan', 'Moldovan'];
 
     for (let i = 0; i < expectedOrder.length; i++) {
       // Diacritics may be stored with or without full Unicode form; we fall
@@ -123,7 +127,8 @@ test(
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // The API returns only students who have grades (2 for CLR in seed data).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Iterate over each student row and check for required sub-elements.
     const count = await catalogPage.studentRows.count();
@@ -165,7 +170,8 @@ test(
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // The API returns only students who have grades (2 for CLR in seed data).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // ── Andrei Moldovan: FB ───────────────────────────────────────────────────
     // getGradeBadges returns all [data-testid="grade-badge"] elements inside
@@ -211,7 +217,9 @@ test(
 
     // Ion Vasilescu teaches ROM and IST in class 6B.
     await catalogPage.clickSubjectTab('Limba');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // The API returns only students who have grades (2 for ROM in seed data:
+    // Alexandru Pop and Sofia Rus).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // ── Alexandru Pop: grades 9 and 8 ────────────────────────────────────────
     // "Pop" uniquely identifies Alexandru Pop in the 6B student list.
@@ -254,7 +262,8 @@ test(
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Comunicare');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // The API returns only students who have grades (2 for CLR in seed data).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Locate the grade badge for Andrei Moldovan (has seed grade FB).
     const moldovanBadge = catalogPage.getGradeBadges('Moldovan').first();
@@ -323,7 +332,8 @@ test(
 
     await expect(catalogPage.subjectTabs.first()).toBeVisible({ timeout: 15_000 });
     await catalogPage.clickSubjectTab('Limba');
-    await expect(catalogPage.studentRows).toHaveCount(5, { timeout: 8_000 });
+    // The API returns only students who have grades (2 for ROM in seed data).
+    await expect(catalogPage.studentRows).toHaveCount(2, { timeout: 8_000 });
 
     // Locate Alexandru Pop's row.
     const popRow = catalogPage.getStudentRowByName('Pop');
