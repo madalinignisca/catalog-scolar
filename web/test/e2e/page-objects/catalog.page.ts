@@ -157,19 +157,49 @@ export class CatalogPage {
    * @param classId - The UUID of the class to open, e.g. '018e4c3d-...'
    */
   async goto(classId: string): Promise<void> {
-    // Use Nuxt's client-side router instead of page.goto() to preserve
-    // the auth tokens in localStorage. A full page.goto() triggers SSR where
-    // localStorage is unavailable, causing the auth check to redirect to /login.
+    // Navigate via the dashboard's class card button (SPA navigation).
+    // We CANNOT use page.goto() because it triggers SSR where localStorage
+    // is unavailable, causing the auth check to redirect to /login.
+    // Instead, we ensure the dashboard is loaded, then click the class card.
     //
-    // We access the Vue Router instance through the Nuxt app context and call
-    // router.push() for true SPA navigation (no SSR round-trip).
-    await this.page.evaluate((id: string) => {
-      // Trigger client-side navigation via history + popstate.
-      // This avoids accessing Vue internals and stays within standard Web APIs.
-      // Vue Router listens for popstate events to handle navigation.
-      window.history.pushState({}, '', `/catalog/${id}`);
-      window.dispatchEvent(new PopStateEvent('popstate'));
-    }, classId);
+    // Step 1: Wait for the teacher dashboard content to load.
+    await this.page.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 15_000 });
+
+    // Step 2: Click the class card button. The card uses @click="openClass()"
+    // which calls navigateTo('/catalog/{classId}') — true SPA navigation.
+    const cards = this.page.getByTestId('class-card');
+    const cardCount = await cards.count();
+
+    // Try to find the card that navigates to the target class ID.
+    // Cards don't have the classId in a data attribute, so we click the one
+    // whose @click handler will navigate to the right URL.
+    // For simplicity, if there's only one card, click it. Otherwise, click
+    // each card and check if the URL matches.
+    if (cardCount === 1) {
+      await cards.first().click();
+    } else {
+      // Multiple cards — click each until we find the right one.
+      // This is needed when a teacher has multiple classes.
+      let found = false;
+      for (let i = 0; i < cardCount; i++) {
+        const card = cards.nth(i);
+        // Try to match by checking if this card leads to the right URL
+        // after clicking. We'll detect via URL change.
+        await card.click();
+        await this.page.waitForTimeout(500);
+        if (this.page.url().includes(classId)) {
+          found = true;
+          break;
+        }
+        // Wrong card — go back to dashboard and try next
+        await this.page.goBack();
+        await this.page.getByTestId('dashboard-content').waitFor({ state: 'visible', timeout: 5_000 });
+      }
+      if (!found) {
+        throw new Error(`No class card found that navigates to classId: ${classId}`);
+      }
+    }
+
     await this.page.waitForURL(`**/catalog/${classId}`, { timeout: 15_000 });
   }
 
