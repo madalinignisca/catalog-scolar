@@ -102,7 +102,7 @@ async function flushQueue(): Promise<void> {
 
     // Process results
     for (const result of response.results) {
-      const mutation = pending.find((m) => m.clientId === result.client_id);
+      const mutation = pending.find((m) => m.clientId === result.clientId);
       if (mutation?.id === undefined) continue;
 
       if (result.status === 'synced' || result.status === 'conflict') {
@@ -110,13 +110,13 @@ async function flushQueue(): Promise<void> {
 
         // Update local cache with server ID
         if (
-          result.server_id !== undefined &&
-          result.server_id !== '' &&
+          result.serverId !== undefined &&
+          result.serverId !== '' &&
           mutation.entityType === 'grade'
         ) {
           await db.grades.where('id').equals(mutation.clientId).modify({
-            id: result.server_id,
-            serverId: result.server_id,
+            id: result.serverId,
+            serverId: result.serverId,
           });
         }
       } else {
@@ -125,8 +125,8 @@ async function flushQueue(): Promise<void> {
     }
 
     // Update last sync timestamp
-    if (response.server_timestamp !== '') {
-      await db.syncMeta.put({ key: 'lastSyncAt', value: response.server_timestamp });
+    if (response.serverTimestamp !== '') {
+      await db.syncMeta.put({ key: 'lastSyncAt', value: response.serverTimestamp });
     }
 
     // Notify the composable so the SyncStatus UI updates.
@@ -153,14 +153,16 @@ async function flushQueue(): Promise<void> {
 
 // ── Helpers ──
 
+// NOTE: The api() wrapper auto-converts snake_case API keys to camelCase,
+// so these field names match the CONVERTED output (clientId, not client_id).
 interface SyncPushResponse {
   results: Array<{
-    client_id: string;
+    clientId: string;
     status: 'synced' | 'conflict' | 'error';
-    server_id?: string;
+    serverId?: string;
     error?: string;
   }>;
-  server_timestamp: string;
+  serverTimestamp: string;
 }
 
 async function getDeviceId(): Promise<string> {
