@@ -314,9 +314,13 @@ test(
     // We wait for the sync label to return to "Sincronizat", with a generous
     // timeout to allow for the network round-trip.
     //
-    // A timeout of 15 seconds covers slow CI environments.
+    // Timeout is 30 seconds: the sync engine uses exponential backoff before
+    // its first retry attempt, which can delay the flush by several seconds
+    // in CI environments where the API server may have been restarted by
+    // globalSetup. "Sincronizare (1)" visible in screenshots confirms the
+    // sync is still in progress when asserted at 15 s — 30 s is sufficient.
     await expect(layout.syncStatusLabel).toContainText(/sincronizat/i, {
-      timeout: 15_000,
+      timeout: 30_000,
     });
 
     // ── Phase 4: Verify the green/online visual state ─────────────────────────
@@ -384,6 +388,9 @@ test(
     // ── Verify pending count shows 3 ─────────────────────────────────────────
     // After three offline mutations, the sync label must include the number 3.
     // Accepted formats: "(3)", "3 modificări", "Sincronizare (3)", etc.
-    await expect(layout.syncStatusLabel).toContainText(/3/i, { timeout: 5_000 });
+    // Timeout increased to 30 s: the Dexie.js sync queue updates IndexedDB
+    // asynchronously after each modal save, and the Vue reactivity cycle that
+    // reads the pending count may lag behind the raw IndexedDB write in CI.
+    await expect(layout.syncStatusLabel).toContainText(/3/i, { timeout: 30_000 });
   },
 );

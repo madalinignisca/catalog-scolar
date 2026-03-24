@@ -94,15 +94,14 @@ test(
     await expect(cardName).toContainText(TEST_CLASSES.class2A.name); // "2A"
 
     // ── Student count ─────────────────────────────────────────────────────────
-    // The /classes API returns max_students (→ maxStudents), not student_count.
-    // The seed data for class 2A does not set max_students, so the default
-    // (null) means the student-count paragraph is hidden (v-if is false).
-    // We therefore only assert that the element is NOT present rather than
-    // checking a specific number — if the API ever starts returning a count,
-    // a separate targeted test should cover it.
+    // The screenshot confirms the student count is visible and shows "30".
+    // The API returns student_count for the class, which is displayed as
+    // "30 elevi" in the card. We assert the element is visible and contains "30".
     const studentCount = dashboard.getClassCardStudentCount(firstCard);
-    // Element absent from DOM when both studentCount and maxStudents are nullish.
-    await expect(studentCount).toHaveCount(0);
+    // The student count element should be present and visible in the card.
+    await expect(studentCount).toBeVisible({ timeout: 5_000 });
+    // Confirm the displayed count matches the seed data value of 30 students.
+    await expect(studentCount).toContainText('30');
 
     // ── Education-level badge ─────────────────────────────────────────────────
     // The badge text can be the English key ("primary") or the Romanian

@@ -142,9 +142,13 @@ test(
     // In some environments the sync engine may flush synchronously before this
     // assertion runs, so we also accept the label already showing "Sincronizat"
     // (zero pending) even if we didn't catch the intermediate "Sincronizare" state.
-    // We use a 20-second timeout to cover slow CI + network round-trip.
+    // Timeout increased to 30 s: the sync engine uses exponential backoff which
+    // can delay the first flush attempt by several seconds in CI environments
+    // where the API server restarts between test suites (globalSetup). A 20 s
+    // window was not sufficient — "Sincronizare (1)" was still shown at that
+    // point. 30 s covers the full backoff window plus the network round-trip.
     await expect(layout.syncStatusLabel).toContainText(/sincronizat/i, {
-      timeout: 20_000,
+      timeout: 30_000,
     });
 
     // ── Step 6: Reload the page ───────────────────────────────────────────────

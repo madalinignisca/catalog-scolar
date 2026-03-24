@@ -193,10 +193,21 @@ test(
     // Click the logout button. The page will start navigating to /login.
     await layout.clickLogout();
 
-    // Wait up to 15 seconds for the redirect to /login to complete.
-    // A generous timeout accounts for the logout API call round-trip and
-    // any Nuxt route-transition delays in CI environments.
-    await teacherPage.waitForURL('**/login', { timeout: 15_000 });
+    // Wait for network activity to settle — this allows the logout API call
+    // (POST /api/auth/logout) to complete before we check the URL. Without
+    // this, the waitForURL below can time out if the redirect is delayed by
+    // the in-flight logout request completing after the navigation starts.
+    await teacherPage.waitForLoadState('networkidle').catch(() => {
+      // Ignore networkidle timeout — the page may have already navigated away
+      // before networkidle could be established (fast redirect). We proceed
+      // to waitForURL regardless.
+    });
+
+    // Wait up to 20 seconds for the redirect to /login to complete.
+    // Increased from 15 s to 20 s: in CI the API server may restart between
+    // test suites (globalSetup runs `make dev`), causing the logout request to
+    // take longer than usual on the first post-restart call.
+    await teacherPage.waitForURL('**/login', { timeout: 20_000 });
 
     // Final check: the current URL must be exactly /login (no query params,
     // no hash fragment from a failed auth redirect).

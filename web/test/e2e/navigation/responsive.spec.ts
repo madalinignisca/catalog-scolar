@@ -188,15 +188,23 @@ test(
     // ── Step 3: Click the overlay to close ───────────────────────────────────
     await layout.closeMobileMenu();
 
+    // Wait for the CSS slide-out animation to complete before asserting the
+    // sidebar is off-screen. The sidebar uses transition-transform duration-300
+    // (or similar), so we pause 400 ms to let the transform finish. Without
+    // this settle wait, the toBeInViewport check can fire mid-animation while
+    // the sidebar is still partially visible, causing a flaky failure.
+    await teacherPage.waitForTimeout(400);
+
     // ── Step 4: Sidebar must be off-screen again ──────────────────────────────
     // After closing, the sidebar returns to -translate-x-full (off-screen).
     // The sidebar uses CSS transform, not display:none, so toBeHidden() would
     // not detect the change. Use not.toBeInViewport() which checks actual pixel
     // intersection with the viewport — accurate for transform-based hiding.
+    // Timeout is increased to 8 s to account for slow CI animation frames.
     await expect(
       layout.sidebar,
       'Sidebar drawer should be off-screen after clicking the overlay',
-    ).not.toBeInViewport({ timeout: 5_000 });
+    ).not.toBeInViewport({ timeout: 8_000 });
   },
 );
 
