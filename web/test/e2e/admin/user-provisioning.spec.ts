@@ -111,13 +111,9 @@ const API_BASE = 'http://localhost:8080/api/v1';
  * @param page - A Playwright Page instance that is already authenticated.
  * @returns The JWT access token string, or throws if it is missing.
  */
-async function getAccessToken(
-  page: import('@playwright/test').Page,
-): Promise<string> {
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
   // Run inside the browser: read the token key the Nuxt auth composable uses.
-  const token = await page.evaluate(
-    () => localStorage.getItem('catalogro_access_token'),
-  );
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
 
   if (token === null || token === '') {
     // This should never happen if the auth fixture ran successfully.
@@ -279,10 +275,7 @@ test.describe('user provisioning', () => {
     expect(body.data, 'Response body must have a "data" key').toBeDefined();
 
     // The new user's UUID must be present and non-empty.
-    expect(
-      body.data.id,
-      'Expected "id" field in response — the new user UUID',
-    ).toBeTruthy();
+    expect(body.data.id, 'Expected "id" field in response — the new user UUID').toBeTruthy();
 
     // The activation token is what the secretary sends to the new teacher.
     // It must be a non-empty string (the exact value is not asserted here —
@@ -619,10 +612,7 @@ test.describe('user provisioning', () => {
 
     // Sanity check — make sure we got a URL back before navigating to it.
     expect(activationUrl, 'activation_url must be present in the response').toBeTruthy();
-    expect(
-      activationUrl,
-      'activation_url must start with "http"',
-    ).toMatch(/^https?:\/\//);
+    expect(activationUrl, 'activation_url must start with "http"').toMatch(/^https?:\/\//);
 
     /**
      * Step 2: Navigate the Playwright browser to the activation URL.
@@ -687,10 +677,10 @@ test.describe('user provisioning', () => {
     const pageText = ((await secretaryPage.textContent('body')) ?? '').toLowerCase();
     const hasActivationKeyword =
       pageText.includes('activare') || // "activare cont" = account activation
-      pageText.includes('activați') ||  // "activați contul" = activate account
-      pageText.includes('parolă') ||    // "setați parola" = set password
-      pageText.includes('token') ||     // raw token display in dev/debug mode
-      pageText.includes('activate');    // English fallback in dev environment
+      pageText.includes('activați') || // "activați contul" = activate account
+      pageText.includes('parolă') || // "setați parola" = set password
+      pageText.includes('token') || // raw token display in dev/debug mode
+      pageText.includes('activate'); // English fallback in dev environment
 
     // Outcome D: No 5xx error (already checked above, but we surface it here
     // as a readable outcome for the combined assertion message).
