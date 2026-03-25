@@ -841,3 +841,389 @@ func generateActivationToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// =============================================================================
+// POST /users/me/gdpr/consent — Record GDPR consent for the current user
+// =============================================================================
+
+// RecordConsent handles POST /users/me/gdpr/consent.
+//
+// Records the authenticated user's GDPR consent by stamping gdpr_consent_at
+// with the current timestamp. This endpoint is required for parents who must
+// accept the data processing terms before their children's accounts become
+// visible to them in the platform.
+//
+// Romanian law and the EU GDPR (Regulation 2016/679) require that consent is:
+//   - Freely given (no coercion)
+//   - Specific and informed (user knows what data is processed)
+//   - Unambiguous (an affirmative act — calling this endpoint)
+//   - Recorded with a timestamp (stored in users.gdpr_consent_at)
+//
+// Handler flow:
+//  1. Retrieve transaction-scoped Queries from context (RLS is active)
+//  2. Extract the current user's UUID from the JWT claims
+//  3. Call SetGDPRConsent to stamp gdpr_consent_at = now()
+//  4. Return 200 OK with { "data": { "consent_recorded": true, "timestamp": "..." } }
+//
+// Possible responses:
+//   - 200 OK:                  { "data": { "consent_recorded": true, "timestamp": "..." } }
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: database failure
+func (h *Handler) RecordConsent(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Retrieve the transaction-scoped Queries from context.
+	// TenantContext middleware creates this before our handler runs.
+	// All queries run through this object respect the current school's RLS policy.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		h.logger.Error("record_consent: queries not found in context — is TenantContext middleware active?")
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Get the current user's UUID from the JWT claims.
+	// SECURITY: The user ID always comes from the verified JWT — never from a
+	// URL parameter or request body. This prevents a user from recording consent
+	// on behalf of another user (horizontal privilege escalation).
+	userID, err := auth.GetUserID(r.Context())
+	if err != nil {
+		h.logger.Warn("record_consent: could not get user ID from context", "error", err)
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 3: Stamp gdpr_consent_at = now() for this user.
+	// SetGDPRConsent is an UPDATE query: UPDATE users SET gdpr_consent_at = now()
+	// WHERE id = $1. It is safe to call multiple times (idempotent after first call).
+	if err := queries.SetGDPRConsent(r.Context(), userID); err != nil {
+		h.logger.Error("record_consent: failed to set GDPR consent",
+			"error", err,
+			"user_id", userID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 4: Return 200 OK with the consent confirmation and current timestamp.
+	// The timestamp is set to now() by the SQL query; we return the Go-level
+	// now() as the response timestamp (it will be within milliseconds of the DB value).
+	httputil.Success(w, map[string]any{
+		"consent_recorded": true,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// =============================================================================
+// POST /users/me/gdpr/export — Export all personal data for the current user
+// =============================================================================
+
+// gdprExportProfile is the safe subset of a user's profile included in the GDPR
+// data export. Sensitive fields (password_hash, totp_secret, activation_token)
+// are intentionally omitted — the export is for the data subject to review,
+// not for authentication or security purposes.
+//
+// GDPR Article 20 (Right to Data Portability) requires that we provide the
+// user's data in a "structured, commonly used and machine-readable format."
+// JSON satisfies this requirement.
+type gdprExportProfile struct {
+	// ID is the user's UUID primary key in the CatalogRO system.
+	ID string `json:"id"`
+
+	// SchoolID is the school (tenant) the user belongs to.
+	SchoolID string `json:"school_id"`
+
+	// Role is the user's role: admin, secretary, teacher, parent, or student.
+	Role string `json:"role"`
+
+	// Email is the user's email address. May be null for phone-only accounts.
+	Email *string `json:"email,omitempty"`
+
+	// Phone is the user's phone number. May be null.
+	Phone *string `json:"phone,omitempty"`
+
+	// FirstName is the user's given name.
+	FirstName string `json:"first_name"`
+
+	// LastName is the user's family name.
+	LastName string `json:"last_name"`
+
+	// IsActive indicates whether the account is currently active.
+	IsActive bool `json:"is_active"`
+
+	// GdprConsentAt is when the user recorded their GDPR consent. Null if not yet consented.
+	GdprConsentAt *time.Time `json:"gdpr_consent_at,omitempty"`
+
+	// ActivatedAt is when the user first set their password. Null if account is still pending.
+	ActivatedAt *time.Time `json:"activated_at,omitempty"`
+
+	// LastLoginAt is the most recent successful login timestamp. Null if never logged in.
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+
+	// CreatedAt is when the account was provisioned.
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// gdprExportChild is the subset of a child's (student's) data included in the
+// parent's GDPR export. We include enough to identify the child and their class,
+// but not their grades or absences (deferred to a future bulk export feature).
+type gdprExportChild struct {
+	// ID is the student's UUID.
+	ID string `json:"id"`
+
+	// FirstName and LastName identify the child.
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+
+	// Email is the child's email address. May be omitted for young students.
+	Email string `json:"email,omitempty"`
+
+	// Role is always "student" for children in this export.
+	Role string `json:"role"`
+
+	// ClassID is the UUID of the class the student is enrolled in.
+	ClassID string `json:"class_id,omitempty"`
+
+	// ClassName is the human-readable class label (e.g., "6B", "10A").
+	ClassName string `json:"class_name,omitempty"`
+
+	// ClassEducationLevel is primary, middle, or high.
+	ClassEducationLevel string `json:"class_education_level,omitempty"`
+}
+
+// ExportData handles POST /users/me/gdpr/export.
+//
+// Produces a GDPR data portability export for the authenticated user.
+// The export includes:
+//   - The user's own profile (all fields except password_hash, totp_secret,
+//     activation_token — security-sensitive fields are excluded).
+//   - If the user is a parent, the list of linked children with their current
+//     class enrollment.
+//
+// NOTE: Grades and absences export is intentionally deferred to a future
+// milestone. The profile + children export satisfies the minimum GDPR Art. 20
+// requirement. A full audit history export would require joining many tables and
+// is better served as an asynchronous PDF/CSV generation job.
+//
+// Handler flow:
+//  1. Retrieve transaction-scoped Queries from context (RLS is active)
+//  2. Extract user ID from JWT
+//  3. Fetch user profile via GetUserDataExport
+//  4. If the user is a parent, fetch children via ListChildrenForParent
+//  5. Build export payload, omitting sensitive fields
+//  6. Return 200 OK with the export data
+//
+// Possible responses:
+//   - 200 OK:                  { "data": { "profile": {...}, "children": [...] } }
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: database failure
+func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Retrieve the transaction-scoped Queries from context.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		h.logger.Error("export_data: queries not found in context — is TenantContext middleware active?")
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Get the current user's UUID from the JWT claims.
+	// The export is always scoped to the authenticated user — no other user's
+	// data can be requested via this endpoint.
+	userID, err := auth.GetUserID(r.Context())
+	if err != nil {
+		h.logger.Warn("export_data: could not get user ID from context", "error", err)
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 3: Fetch the user's full profile from the database.
+	// GetUserDataExport returns the complete users row. We will filter out
+	// sensitive fields when building the response (see gdprExportProfile above).
+	u, err := queries.GetUserDataExport(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("export_data: failed to fetch user profile",
+			"error", err,
+			"user_id", userID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 4: Build the safe profile export — strip all security-sensitive fields.
+	// password_hash:    cleared — never expose password material
+	// totp_secret:      cleared — would allow an attacker to clone the user's 2FA
+	// activation_token: cleared — single-use token, no reason to expose it in export
+	profile := gdprExportProfile{
+		ID:        u.ID.String(),
+		SchoolID:  u.SchoolID.String(),
+		Role:      string(u.Role),
+		FirstName: u.FirstName,
+		LastName:  u.LastName,
+		IsActive:  u.IsActive,
+		CreatedAt: u.CreatedAt,
+	}
+
+	// Nullable fields — only set them if they have a DB value (Valid=true for
+	// pgtype.Timestamptz, non-nil for *string).
+	if u.Email != nil {
+		profile.Email = u.Email
+	}
+	if u.Phone != nil {
+		profile.Phone = u.Phone
+	}
+	if u.GdprConsentAt.Valid {
+		t := u.GdprConsentAt.Time
+		profile.GdprConsentAt = &t
+	}
+	if u.ActivatedAt.Valid {
+		t := u.ActivatedAt.Time
+		profile.ActivatedAt = &t
+	}
+	if u.LastLoginAt.Valid {
+		t := u.LastLoginAt.Time
+		profile.LastLoginAt = &t
+	}
+
+	// Step 5: If the user is a parent, also include their linked children.
+	// Non-parent users will have an empty slice here. The children list is
+	// included in all exports (it will simply be empty for non-parents), which
+	// keeps the response shape consistent regardless of the user's role.
+	children := make([]gdprExportChild, 0)
+	if u.Role == "parent" {
+		// ListChildrenForParent joins parent_student_links → users → class_enrollments → classes.
+		// Returns an empty slice (not an error) if the parent has no linked children.
+		rows, err := queries.ListChildrenForParent(r.Context(), userID)
+		if err != nil {
+			h.logger.Error("export_data: failed to fetch children",
+				"error", err,
+				"user_id", userID,
+			)
+			httputil.InternalError(w)
+			return
+		}
+
+		// Map each child row to the export shape. Class fields may be absent
+		// if the child is not currently enrolled in any class (LEFT JOIN nulls).
+		for i := range rows {
+			row := &rows[i]
+			child := gdprExportChild{
+				ID:        row.ID.String(),
+				FirstName: row.FirstName,
+				LastName:  row.LastName,
+				Role:      string(row.Role),
+			}
+			if row.Email != nil {
+				child.Email = *row.Email
+			}
+			if row.ClassID.Valid {
+				child.ClassID = uuid.UUID(row.ClassID.Bytes).String()
+			}
+			if row.ClassName != nil {
+				child.ClassName = *row.ClassName
+			}
+			if row.ClassEducationLevel.Valid {
+				child.ClassEducationLevel = string(row.ClassEducationLevel.EducationLevel)
+			}
+			children = append(children, child)
+		}
+	}
+
+	// Step 6: Return the complete export payload.
+	// The response shape is { "data": { "profile": {...}, "children": [...] } }.
+	// children is always an array (never null), even for non-parent users.
+	httputil.Success(w, map[string]any{
+		"profile":  profile,
+		"children": children,
+	})
+}
+
+// =============================================================================
+// POST /users/me/gdpr/delete — Request deletion (anonymisation) of own account
+// =============================================================================
+
+// RequestDeletion handles POST /users/me/gdpr/delete.
+//
+// Soft-deletes the authenticated user's own account by:
+//   - Setting is_active = false (prevents future logins)
+//   - Anonymizing PII: email=NULL, phone=NULL, first_name='DELETED', last_name='USER'
+//   - Clearing security secrets: password_hash=NULL, totp_secret=NULL, totp_enabled=false
+//
+// IMPORTANT: The user row is NEVER hard-deleted. Romanian education law (ROFUIP
+// and Law 1/2011) requires that student academic records be retained for 10+ years
+// for official transcripts and re-enrolment purposes. Even parent and teacher
+// records are kept for audit trail integrity (e.g., who entered which grade).
+//
+// The JWT access token remains technically valid until it expires (up to 15 minutes),
+// but the user will be unable to log in again because GetUserByEmailForLogin filters
+// by is_active = true. Any in-flight requests after deletion will succeed only if
+// their JWT has not expired yet — this is an acceptable trade-off (see RFC 9068).
+//
+// SECURITY NOTE: This is a destructive and irreversible action. In a future version,
+// this endpoint should require password re-confirmation (re-authentication challenge)
+// to prevent CSRF or session hijacking attacks from triggering accidental deletion.
+//
+// Handler flow:
+//  1. Retrieve transaction-scoped Queries from context (RLS is active)
+//  2. Extract user ID from JWT
+//  3. Call SoftDeleteUser to anonymize the user row
+//  4. Return 200 OK with { "data": { "deleted": true } }
+//
+// Possible responses:
+//   - 200 OK:                  { "data": { "deleted": true } }
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: database failure
+func (h *Handler) RequestDeletion(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Retrieve the transaction-scoped Queries from context.
+	// TenantContext middleware must have run before this handler.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		h.logger.Error("request_deletion: queries not found in context — is TenantContext middleware active?")
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Get the current user's UUID from the JWT claims.
+	// SECURITY: User ID comes from the JWT, not from a URL parameter. A user
+	// can only delete their own account — never another user's.
+	userID, err := auth.GetUserID(r.Context())
+	if err != nil {
+		h.logger.Warn("request_deletion: could not get user ID from context", "error", err)
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 3: Soft-delete the user row.
+	// SoftDeleteUser runs:
+	//   UPDATE users SET is_active=false, email=NULL, phone=NULL,
+	//     first_name='DELETED', last_name='USER', password_hash=NULL,
+	//     totp_secret=NULL, totp_enabled=false, updated_at=now()
+	//   WHERE id = $1
+	//
+	// After this executes:
+	//   - The user cannot log in again (is_active=false blocks login query)
+	//   - No PII remains on the row (email, phone, name are cleared/anonymized)
+	//   - The row itself is preserved for audit purposes (UUID, school_id, role,
+	//     created_at, gdpr_consent_at, activated_at all remain intact)
+	//
+	// The existing JWT will still pass JWTAuth middleware until it expires
+	// (access tokens have a 15-minute lifetime), but since is_active=false the
+	// user cannot obtain a new token via login or refresh.
+	if err := queries.SoftDeleteUser(r.Context(), userID); err != nil {
+		h.logger.Error("request_deletion: failed to soft-delete user",
+			"error", err,
+			"user_id", userID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 4: Log the deletion for compliance purposes.
+	// This log line forms part of the audit trail required by GDPR Art. 5(2)
+	// (accountability principle) and Romanian data protection law.
+	h.logger.Info("request_deletion: user account anonymised (GDPR Art. 17)",
+		"user_id", userID,
+	)
+
+	// Step 5: Return 200 OK confirming that the deletion was processed.
+	httputil.Success(w, map[string]any{
+		"deleted": true,
+	})
+}
+
