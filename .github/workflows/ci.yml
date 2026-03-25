@@ -244,33 +244,21 @@ jobs:
         working-directory: web
         run: npx playwright install chromium --with-deps
 
-      # ── Start Nuxt dev server (background) ────────────────────────────────
-      # playwright.config.ts has a webServer block that would start Nuxt when
-      # CI=true, but we start it here manually so the "Wait for servers" step
-      # below can verify both servers are up before handing control to Playwright.
-      # Setting reuseExistingServer: false in the config means Playwright will
-      # reuse this already-running instance rather than starting a second one.
-      - name: Start Nuxt dev server
-        working-directory: web
-        run: npm run dev &
-
-      # ── Wait for both servers ──────────────────────────────────────────────
-      # Poll both endpoints for up to 90 seconds (30 x 3 s). Both must return
-      # HTTP 200 before we let Playwright start — otherwise the first test
-      # would fail with a connection-refused error.
-      - name: Wait for servers
+      # ── Wait for API server ──────────────────────────────────────────────
+      # Nuxt is started automatically by Playwright's webServer config (CI=true).
+      # We only need to wait for the Go API server to be healthy.
+      - name: Wait for API server
         run: |
           for i in $(seq 1 30); do
             api=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz 2>/dev/null || echo "000")
-            nuxt=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000 2>/dev/null || echo "000")
-            if [ "$api" = "200" ] && [ "$nuxt" = "200" ]; then
-              echo "Both servers ready at attempt $i"
+            if [ "$api" = "200" ]; then
+              echo "API server ready at attempt $i"
               exit 0
             fi
-            echo "Waiting... API=$api Nuxt=$nuxt (attempt $i)"
+            echo "Waiting for API... status=$api (attempt $i)"
             sleep 3
           done
-          echo "Timeout waiting for servers"
+          echo "Timeout waiting for API server"
           exit 1
 
       # ── Run Playwright E2E tests ───────────────────────────────────────────
