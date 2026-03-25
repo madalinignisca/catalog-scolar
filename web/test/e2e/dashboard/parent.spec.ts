@@ -33,17 +33,18 @@ test('26 – parent sees children section heading on the dashboard', async ({ pa
   /**
    * parentPage is already logged in as Ion Moldovan and on '/'.
    *
-   * The parent dashboard is currently a placeholder that shows:
-   *   - A "Copiii mei" (My Children) section heading
-   *   - "Încărcare date..." loading text (data not yet wired up)
+   * The parent dashboard fetches children from GET /users/me/children and
+   * renders a card for each linked child. Seed data links:
+   *   - Ion Moldovan (parent) → Andrei Moldovan (student, class 2A, primary)
    *
-   * The child's actual name ("Andrei Moldovan") is NOT shown yet because
-   * the parent-children API is not connected in the current implementation.
-   * We therefore assert on the section heading ("Copiii mei") that is
-   * guaranteed to appear, rather than the child's name which is not rendered.
+   * We assert on:
+   *   1. The "Copiii mei" section heading — confirms the parent UI is shown
+   *   2. At least one child card with data-testid="child-card" is rendered
+   *   3. The child's first name "Andrei" appears inside a card
+   *   4. The class name "2A" appears inside a card
    *
-   * When the parent dashboard is fully implemented, this test should be
-   * updated to also check for the child's name ("Andrei" / "Moldovan").
+   * All assertions use a 15-second timeout to allow for the async API call
+   * that populates the children list after the page mounts.
    */
   const dashboard = new DashboardPage(parentPage);
 
@@ -56,6 +57,21 @@ test('26 – parent sees children section heading on the dashboard', async ({ pa
   // minor capitalisation variations.
   const childrenHeading = parentPage.getByText(/copiii mei/i);
   await expect(childrenHeading.first()).toBeVisible();
+
+  // At least one child card must be rendered after the API call resolves.
+  // The first() selector is used because there may be multiple children.
+  // We use a generous timeout because the child fetch happens async after mount.
+  const childCards = parentPage.getByTestId('child-card');
+  await expect(childCards.first()).toBeVisible({ timeout: 15_000 });
+
+  // The child's first name "Andrei" must appear in the first child card.
+  // Seed data: Ion Moldovan has one child, Andrei Moldovan (class 2A).
+  const firstCard = childCards.first();
+  await expect(firstCard.getByText(/andrei/i)).toBeVisible();
+
+  // The class name "2A" must appear somewhere in the first child card.
+  // The template renders "Clasa 2A" so a substring match on "2A" is sufficient.
+  await expect(firstCard.getByText(/2A/)).toBeVisible();
 });
 
 // ── Test 27 ────────────────────────────────────────────────────────────────────
