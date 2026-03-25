@@ -263,7 +263,10 @@ func run() error {
 			r.With(auth.RequireRole("admin", "secretary")).Post("/users", userHandler.ProvisionUser)
 
 			r.Post("/users/import", notImplemented)
-			r.Post("/users/{userId}/resend-activation", notImplemented)
+
+			// POST /users/{userId}/resend-activation — generate a fresh activation token
+			// for a user who has not yet activated their account (admin/secretary only).
+			r.With(auth.RequireRole("admin", "secretary")).Post("/users/{userId}/resend-activation", userHandler.ResendActivation)
 
 			// GET /users/pending — list accounts awaiting activation (admin/secretary only).
 			// NOTE: this route must be registered BEFORE /users/{userId} (if that is ever

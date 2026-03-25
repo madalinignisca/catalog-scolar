@@ -96,6 +96,16 @@ UPDATE users SET
     updated_at = now()
 WHERE id = $1;
 
+-- name: ResendActivation :one
+-- Generates a new activation token for an unactivated user.
+-- Only works if activated_at IS NULL (prevents resending for already-activated users).
+UPDATE users SET
+    activation_token = $2,
+    activation_sent_at = now(),
+    updated_at = now()
+WHERE id = $1 AND activated_at IS NULL
+RETURNING *;
+
 -- name: GetUserDataExport :one
 -- Returns profile data for GDPR export. Explicitly lists columns to EXCLUDE
 -- sensitive fields (password_hash, totp_secret, activation_token) at the SQL

@@ -45,6 +45,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -1949,4 +1950,312 @@ func TestRequestDeletion_SoftDeletesUser(t *testing.T) {
 	// (is_active=false, first_name='DELETED', etc.) — there is no complex
 	// conditional logic that could silently fail.
 	t.Logf("RequestDeletion: teacher %s successfully soft-deleted (verified via API response)", teacherID)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for ResendActivation tests
+// ---------------------------------------------------------------------------
+
+// postResendActivation builds an *http.Request for
+// POST /users/{userId}/resend-activation.
+//
+// Because the handler uses chi.URLParam(r, "userId") to extract the path
+// parameter, we must inject the chi route context manually — the same pattern
+// used by school.handler_test.go for class/student URL params.
+//
+// The request body is empty (no JSON payload is required for this endpoint).
+func postResendActivation(t *testing.T, userID string) *http.Request {
+	t.Helper()
+
+	// httptest.NewRequest creates an in-memory request; no real HTTP socket needed.
+	// The URL path is informational only — chi reads params from the route context.
+	req := httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/users/%s/resend-activation", userID),
+		http.NoBody,
+	)
+
+	// chi stores URL parameters in the request context under chi.RouteCtxKey.
+	// Without this injection, chi.URLParam(r, "userId") returns an empty string,
+	// which would cause uuid.Parse to fail and the handler to return 400.
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("userId", userID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
+}
+
+// insertPendingUser inserts an unactivated user row directly via the superuser
+// connection (bypasses RLS). The user has activated_at IS NULL and a placeholder
+// activation token, exactly as ProvisionUser would create them.
+//
+// Returns the UUID of the newly inserted user.
+func insertPendingUser(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	schoolID uuid.UUID,
+	adminID uuid.UUID,
+	email, firstName, lastName, role string,
+) uuid.UUID {
+	t.Helper()
+
+	ctx := context.Background()
+
+	// Use a deterministic UUID based on the email so the test is idempotent
+	// when ON CONFLICT DO NOTHING is specified.
+	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-pending-resend-"+email))
+
+	// testToken is a fixed 64-char hex placeholder for the activation_token column.
+	// The column is NOT NULL, so we need some value. The ResendActivation handler
+	// will replace it with a fresh cryptographic token during the test.
+	//nolint:gosec // test fixture value, not a real secret
+	const testToken = "deadbeefdeadbeefdeadbeefdeadbeef" +
+		"deadbeefdeadbeefdeadbeefdeadbeef"
+
+	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO users (id, school_id, role, email, first_name, last_name,
+			is_active, activation_token, activation_sent_at, provisioned_by)
+		VALUES ($1, $2, $3::user_role, $4, $5, $6,
+			true, $7, now(), $8)
+		ON CONFLICT (id) DO NOTHING`,
+		id, schoolID, role, email, firstName, lastName, testToken, adminID,
+	)
+	if err != nil {
+		t.Fatalf("insertPendingUser: insert %s: %v", email, err)
+	}
+
+	return id
+}
+
+// ---------------------------------------------------------------------------
+// Test: ResendActivation — happy path (200 + new token)
+// ---------------------------------------------------------------------------
+
+// TestResendActivation_Success verifies that POST /users/{userId}/resend-activation
+// returns 200 OK and provides a fresh activation_token and activation_url
+// when the target user exists and has NOT yet activated their account.
+//
+// Scenario:
+//   - A pending (unactivated) user is inserted directly into the DB.
+//   - The admin calls ResendActivation for that user's ID.
+//   - The handler generates a new 64-char hex token, stores it in the DB,
+//     and returns 200 with { data: { activation_token, activation_url, sent_at } }.
+//
+// What we assert:
+//   - HTTP status is 200 OK.
+//   - response.data.activation_token is a 64-character hex string.
+//   - response.data.activation_url starts with "http://localhost:3000/activate/".
+//   - response.data.sent_at is a non-empty timestamp string.
+//   - The new token is different from the placeholder token we inserted.
+func TestResendActivation_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users1["admin"]
+
+	// -----------------------------------------------------------------------
+	// 2. Create the pending (unactivated) user.
+	// -----------------------------------------------------------------------
+	// insertPendingUser inserts a row with activated_at IS NULL and a known
+	// placeholder activation_token. The ResendActivation handler should replace
+	// the placeholder with a fresh cryptographically random token.
+	pendingID := insertPendingUser(
+		t, pool, school1ID, adminID,
+		"pending.resend@test.catalogro.ro",
+		"Pending", "Resend", "parent",
+	)
+
+	// -----------------------------------------------------------------------
+	// 3. Build the request with the pending user's ID in the URL.
+	// -----------------------------------------------------------------------
+	req := postResendActivation(t, pendingID.String())
+
+	// -----------------------------------------------------------------------
+	// 4. Inject the auth + tenant context.
+	// -----------------------------------------------------------------------
+	// withTenantContext begins a real PG transaction, sets the RLS school_id,
+	// and injects Queries + Claims so the handler can execute SQL.
+	req, rollback := withTenantContext(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 5. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.ResendActivation(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 6. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ResendActivation: expected 200, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 7. Decode and assert the response body.
+	// -----------------------------------------------------------------------
+	data := decodeData(t, rr)
+
+	// activation_token must be a 64-character hex string (32 random bytes).
+	token, _ := data["activation_token"].(string)
+	if len(token) != 64 {
+		t.Errorf("ResendActivation: expected activation_token to be 64 chars, got %d: %q",
+			len(token), token)
+	}
+
+	// The new token must be different from the placeholder we inserted.
+	// If they are the same, the handler is returning cached data instead of
+	// generating a fresh token.
+	const placeholderToken = "deadbeefdeadbeefdeadbeefdeadbeef" +
+		"deadbeefdeadbeefdeadbeefdeadbeef"
+	if token == placeholderToken {
+		t.Errorf("ResendActivation: new token must differ from placeholder; got placeholder back")
+	}
+
+	// activation_url must start with the base URL and contain the new token.
+	activationURL, _ := data["activation_url"].(string)
+	expectedURLPrefix := fmt.Sprintf("http://localhost:3000/activate/%s", token)
+	if activationURL != expectedURLPrefix {
+		t.Errorf("ResendActivation: expected activation_url %q, got %q",
+			expectedURLPrefix, activationURL)
+	}
+
+	// sent_at must be a non-empty string (the DB sets activation_sent_at = now()).
+	sentAt, _ := data["sent_at"].(string)
+	if sentAt == "" {
+		t.Errorf("ResendActivation: expected non-empty sent_at, got empty string")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: ResendActivation — already-activated user returns 404
+// ---------------------------------------------------------------------------
+
+// TestResendActivation_AlreadyActivated verifies that the endpoint returns
+// 404 Not Found when the target user already has activated_at IS NOT NULL.
+//
+// This is the primary security guard: once a user has completed activation
+// and set their password, their activation token cannot be replaced via this
+// endpoint. This prevents a rogue secretary from invalidating a live account's
+// credentials by re-issuing an activation link.
+//
+// Scenario:
+//   - An activated user is inserted via insertActivatedUser (activated_at = now()).
+//   - The admin calls ResendActivation for that user's ID.
+//   - The handler's UPDATE WHERE activated_at IS NULL matches zero rows.
+//   - The handler returns 404 "User not found or already activated".
+func TestResendActivation_AlreadyActivated(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users1["admin"]
+
+	// -----------------------------------------------------------------------
+	// 2. Insert an already-activated teacher user.
+	// -----------------------------------------------------------------------
+	// insertActivatedUser (defined earlier in this file) creates a user row
+	// with activated_at = now(), simulating a user who completed account setup.
+	activatedID := insertActivatedUser(
+		t, pool, school1ID,
+		"activated.teacher@test.catalogro.ro",
+		"Activated", "Teacher", "teacher",
+	)
+
+	// -----------------------------------------------------------------------
+	// 3. Build the request and inject tenant context.
+	// -----------------------------------------------------------------------
+	req := postResendActivation(t, activatedID.String())
+	req, rollback := withTenantContext(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.ResendActivation(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 404 Not Found.
+	// -----------------------------------------------------------------------
+	// The UPDATE returns no rows because activated_at IS NOT NULL.
+	// The handler must map this to 404, not 500 or 200.
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("ResendActivation: expected 404 for activated user, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// The error body must follow the standard { "error": { ... } } envelope.
+	_, msg := decodeError(t, rr)
+	if !strings.Contains(msg, "already activated") && !strings.Contains(msg, "not found") {
+		t.Errorf("ResendActivation: expected error message to mention 'already activated' or 'not found', got: %q", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: ResendActivation — invalid UUID returns 400
+// ---------------------------------------------------------------------------
+
+// TestResendActivation_InvalidUUID verifies that sending a non-UUID string
+// as the userId path parameter returns 400 Bad Request.
+//
+// The handler calls uuid.Parse before any DB query. A malformed UUID indicates
+// a client-side bug (e.g., passing "undefined" or "not-a-uuid"), and the
+// appropriate response is 400, not 500.
+//
+// Scenario:
+//   - The admin calls POST /users/not-a-uuid/resend-activation.
+//   - uuid.Parse("not-a-uuid") fails.
+//   - The handler returns 400 INVALID_UUID before touching the database.
+func TestResendActivation_InvalidUUID(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users1["admin"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build a request with a syntactically invalid userId.
+	// -----------------------------------------------------------------------
+	// "not-a-uuid" is not a valid UUID format. The handler should reject it
+	// immediately in the UUID-parse step (step 2 in the handler flow).
+	req := postResendActivation(t, "not-a-uuid")
+	req, rollback := withTenantContext(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.ResendActivation(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 4. Assert HTTP 400 Bad Request.
+	// -----------------------------------------------------------------------
+	// uuid.Parse failure → 400, never 500.
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("ResendActivation: expected 400 for invalid UUID, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// The error code must be INVALID_UUID (not a generic message).
+	code, _ := decodeError(t, rr)
+	if code != "INVALID_UUID" {
+		t.Errorf("ResendActivation: expected error code 'INVALID_UUID', got %q", code)
+	}
 }

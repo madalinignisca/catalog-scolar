@@ -4,10 +4,11 @@
 // and secretaries to create and inspect user accounts, as well as the
 // self-service profile update endpoint for all authenticated users:
 //
-//	POST /users          — provision a new user (teacher, parent, student, etc.)
-//	GET  /users          — list all active users in the current school
-//	GET  /users/pending  — list users who have not yet completed account activation
-//	PUT  /users/me       — update the current user's own profile (email, phone)
+//	POST /users                              — provision a new user (teacher, parent, student, etc.)
+//	GET  /users                              — list all active users in the current school
+//	GET  /users/pending                      — list users who have not yet completed account activation
+//	POST /users/{userId}/resend-activation   — generate a fresh activation token for a pending user
+//	PUT  /users/me                           — update the current user's own profile (email, phone)
 //
 // Authorization context:
 //   - POST /users, GET /users, and GET /users/pending are restricted to admin
@@ -34,6 +35,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -42,7 +44,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
@@ -823,6 +827,165 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Return 200 OK — the profile was updated (or unchanged) successfully.
 	httputil.Success(w, resp)
+}
+
+// =============================================================================
+// POST /users/{userId}/resend-activation — Re-send an activation link
+// =============================================================================
+
+// resendActivationResponse is the JSON body returned by a successful
+// POST /users/{userId}/resend-activation call.
+// The secretary receives a fresh token and URL to share with the user.
+type resendActivationResponse struct {
+	// ActivationToken is the newly generated 64-character hex token.
+	// The secretary can use this to manually construct a URL if needed,
+	// or simply forward the activation_url below.
+	ActivationToken string `json:"activation_token"`
+
+	// ActivationURL is the full URL the user must open to set their password.
+	// Format: {APP_BASE_URL}/activate/{token}.
+	ActivationURL string `json:"activation_url"`
+
+	// SentAt is the timestamp when this new activation token was generated
+	// and stored in the database (activation_sent_at column, set to now()).
+	// Useful for the secretary to know when the last link was issued.
+	SentAt time.Time `json:"sent_at"`
+}
+
+// ResendActivation handles POST /users/{userId}/resend-activation.
+//
+// Generates a new activation token for a user who has NOT yet activated their
+// account and replaces the old token in the database. This is useful when:
+//   - The original activation email was lost or expired.
+//   - The secretary provisioned the account but the user never received the link.
+//   - The user requests a fresh link (e.g., they deleted the email by accident).
+//
+// SECURITY: Only unactivated users (activated_at IS NULL) can receive a new
+// token. If the user has already activated, the UPDATE returns no rows and the
+// handler responds with 404. This prevents accidentally replacing a live user's
+// credentials.
+//
+// Authorization: restricted to admin and secretary roles. RequireRole middleware
+// enforces this before the handler is called.
+//
+// Handler flow:
+//  1. Extract userId from the URL path via chi.URLParam.
+//  2. Validate it is a valid UUID — reject with 400 if not.
+//  3. Retrieve the transaction-scoped Queries from context (RLS is active).
+//  4. Generate a new cryptographically random 64-character hex activation token.
+//  5. Call ResendActivation query: UPDATE users SET activation_token=..., activated_at IS NULL.
+//  6. If no rows updated (ErrNoRows) → user not found or already activated → 404.
+//  7. Return 200 with { "data": { "activation_token": ..., "activation_url": ..., "sent_at": ... } }.
+//
+// Possible responses:
+//   - 200 OK:                  { "data": { "activation_token": "...", "activation_url": "...", "sent_at": "..." } }
+//   - 400 Bad Request:         userId is not a valid UUID
+//   - 404 Not Found:           user does not exist or is already activated
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: token generation failure or unexpected DB error
+func (h *Handler) ResendActivation(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Extract the userId path parameter from the URL.
+	// chi.URLParam reads the {userId} segment registered in main.go as
+	// r.Post("/users/{userId}/resend-activation", ...).
+	userIDStr := chi.URLParam(r, "userId")
+
+	// Step 2: Parse and validate the UUID.
+	// uuid.Parse returns an error if the string is not in standard UUID format
+	// (e.g., "not-a-uuid" or an empty string). We surface this as a 400 so
+	// the client knows the request itself was malformed — not a server error.
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_UUID", "userId must be a valid UUID")
+		return
+	}
+
+	// Step 3: Retrieve the transaction-scoped Queries from context.
+	// TenantContext middleware sets this up before this handler runs. All queries
+	// executed through this object are automatically scoped to the current school
+	// (via PostgreSQL RLS using app.current_school_id).
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		// This should never happen if the middleware chain is correctly wired.
+		// If it does, it means TenantContext middleware did not run before this handler.
+		h.logger.Error("resend_activation: queries not found in context — is TenantContext middleware active?")
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 4: Generate a new cryptographically random 64-character hex token.
+	// We call the package-level generateActivationToken helper, which reads 32
+	// bytes from crypto/rand and hex-encodes them. The result is URL-safe and
+	// unpredictable — suitable for use as a one-time activation secret.
+	newToken, err := generateActivationToken()
+	if err != nil {
+		h.logger.Error("resend_activation: failed to generate activation token",
+			"error", err,
+			"user_id", userID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 5: Update the database row with the new token.
+	// ResendActivation runs:
+	//   UPDATE users
+	//   SET activation_token = $2, activation_sent_at = now(), updated_at = now()
+	//   WHERE id = $1 AND activated_at IS NULL
+	//   RETURNING *;
+	//
+	// The WHERE clause ensures we only update unactivated users. If the user has
+	// already activated their account (activated_at IS NOT NULL), the UPDATE
+	// matches zero rows and pgx returns ErrNoRows.
+	//
+	// RLS (set by TenantContext) also implicitly scopes the update to the
+	// current school — a secretary of school A cannot resend for school B's users.
+	updatedUser, err := queries.ResendActivation(r.Context(), generated.ResendActivationParams{
+		ID:              userID,
+		ActivationToken: &newToken,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No rows were updated. This means either:
+			//   a) The user ID does not exist in this school (RLS filtered it out).
+			//   b) The user exists but activated_at IS NOT NULL (already activated).
+			// We return 404 in both cases — revealing which case applies would leak
+			// information about other users to the secretary.
+			httputil.NotFound(w, "User not found or already activated")
+			return
+		}
+		// Unexpected database error — log and return 500.
+		h.logger.Error("resend_activation: failed to update activation token",
+			"error", err,
+			"user_id", userID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 6: Build the activation URL from the new token.
+	// The frontend activation page lives at /activate/{token} on the APP_BASE_URL.
+	// The user opens this URL to set their password and complete account setup.
+	activationURL := fmt.Sprintf("%s/activate/%s", h.baseURL, newToken)
+
+	// Step 7: Extract activation_sent_at from the updated row for the response.
+	// The ResendActivation SQL sets activation_sent_at = now(), so this field
+	// is guaranteed to be non-null (Valid=true) after a successful UPDATE.
+	// If it's null, something is wrong with the DB — fail loudly.
+	if !updatedUser.ActivationSentAt.Valid {
+		h.logger.Error("resend_activation: activation_sent_at is unexpectedly null after update", "user_id", userID)
+		httputil.InternalError(w)
+		return
+	}
+	sentAt := updatedUser.ActivationSentAt.Time
+
+	// Step 8: Return 200 OK with the new token and URL.
+	// We return 200 (not 201) because we are updating an existing resource,
+	// not creating a new one. The secretary can share activation_url with the user.
+	httputil.Success(w, resendActivationResponse{
+		ActivationToken: newToken,
+		ActivationURL:   activationURL,
+		SentAt:          sentAt,
+	})
 }
 
 // generateActivationToken creates a cryptographically random 64-character hex
