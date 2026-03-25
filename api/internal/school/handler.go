@@ -1288,6 +1288,10 @@ func (h *Handler) AssignTeacher(w http.ResponseWriter, r *http.Request) {
 	// Romanian schools typically have 1–7 hours per week per subject.
 	hoursPerWeek := int16(1)
 	if req.HoursPerWeek != nil {
+		if *req.HoursPerWeek <= 0 {
+			httputil.BadRequest(w, "INVALID_HOURS", "hours_per_week must be a positive number")
+			return
+		}
 		hoursPerWeek = *req.HoursPerWeek
 	}
 
