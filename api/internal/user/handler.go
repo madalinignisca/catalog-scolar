@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
@@ -538,6 +539,153 @@ func mapUserToPendingResponse(u *generated.User) pendingUserResponse {
 
 	return resp
 }
+
+// =============================================================================
+// GET /users/me/children — List children linked to the current user
+// =============================================================================
+
+// childResponse is the JSON shape for a single child (student) record in the
+// GET /users/me/children response. It combines basic identity fields with
+// the child's current class enrollment details.
+//
+// Class fields are nullable because a child may not yet be enrolled in any class —
+// for example, a newly provisioned student account that has not been assigned to
+// a class yet.
+type childResponse struct {
+	// ID is the student's UUID primary key.
+	ID string `json:"id"`
+
+	// FirstName is the student's given name.
+	FirstName string `json:"first_name"`
+
+	// LastName is the student's family/surname.
+	LastName string `json:"last_name"`
+
+	// Email is the student's email address. May be empty for phone-only accounts
+	// or for young students where no email was collected.
+	Email string `json:"email,omitempty"`
+
+	// Role is always "student" for children returned by this endpoint.
+	Role string `json:"role"`
+
+	// ClassID is the UUID of the class the student is currently enrolled in.
+	// Null/empty if the student is not enrolled in any active class.
+	ClassID string `json:"class_id,omitempty"`
+
+	// ClassName is the human-readable class name (e.g., "2A", "6B", "10A").
+	// Null/empty if the student is not enrolled in any active class.
+	ClassName string `json:"class_name,omitempty"`
+
+	// ClassEducationLevel is the education level of the class (primary/middle/high).
+	// Null/empty if the student is not enrolled in any active class.
+	ClassEducationLevel string `json:"class_education_level,omitempty"`
+}
+
+// ListChildren handles GET /users/me/children.
+//
+// Returns all students (children) linked to the currently authenticated user
+// via the parent_student_links table. Each child entry also includes the class
+// the student is currently enrolled in (if any).
+//
+// This endpoint is accessible to ALL authenticated users — not just parents.
+// A teacher might also want to see which children are linked to their parent
+// accounts for communication purposes. The data returned is always scoped to
+// the current school via RLS.
+//
+// Handler flow:
+//  1. Retrieve the transaction-scoped Queries from context (RLS is active)
+//  2. Extract the current user's ID from the JWT claims
+//  3. Query ListChildrenForParent with the user's ID as the parent_id
+//  4. Map each row to a childResponse (with nullable class fields)
+//  5. Return 200 OK with { "data": [ ... ] }
+//
+// Possible responses:
+//   - 200 OK:                  { "data": [ {...}, ... ] } (empty array if no children)
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: database failure
+func (h *Handler) ListChildren(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Retrieve the transaction-scoped Queries from context.
+	// TenantContext middleware sets this up before this handler runs. All queries
+	// executed through this object are automatically scoped to the current school
+	// (via PostgreSQL RLS using app.current_school_id).
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		h.logger.Error("list_children: queries not found in context — is TenantContext middleware active?")
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Get the current user's UUID from the JWT claims.
+	// auth.GetUserID reads the user_id field from the Claims struct stored in
+	// context by the JWTAuth middleware.
+	userID, err := auth.GetUserID(r.Context())
+	if err != nil {
+		h.logger.Warn("list_children: could not get user ID from context", "error", err)
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 3: Query the database for all children (students) linked to this user.
+	// ListChildrenForParent joins users → parent_student_links → class_enrollments → classes.
+	// If the user has no linked children, the query returns an empty slice (not an error).
+	// If a child has no active enrollment, class_id, class_name, and class_education_level
+	// will be NULL (represented as pgtype.UUID{Valid: false} and nil *string in Go).
+	children, err := queries.ListChildrenForParent(r.Context(), userID)
+	if err != nil {
+		h.logger.Error("list_children: failed to query children", "error", err, "user_id", userID)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 4: Map each row to the safe API response shape.
+	// We use a pre-allocated slice to avoid re-allocations in the loop.
+	// Importantly, we always return an array (never null) — even for users
+	// with no linked children. This makes the client-side handling easier
+	// because the frontend can always iterate data without a nil check.
+	result := make([]childResponse, 0, len(children))
+	for i := range children {
+		// Use index-based iteration to avoid copying the 128-byte ListChildrenForParentRow
+		// struct on each iteration — the same pattern used throughout this package.
+		row := &children[i]
+
+		// Build the base response with the child's identity fields.
+		resp := childResponse{
+			ID:        row.ID.String(),
+			FirstName: row.FirstName,
+			LastName:  row.LastName,
+			Role:      string(row.Role),
+		}
+
+		// Email is a nullable *string in the DB — only include it if present.
+		if row.Email != nil {
+			resp.Email = *row.Email
+		}
+
+		// ClassID is a nullable pgtype.UUID — Valid=true means the child IS enrolled.
+		// LEFT JOIN means this will be a zero UUID with Valid=false when not enrolled.
+		// pgtype.UUID.Bytes is [16]byte — we format it as the standard 8-4-4-4-12 UUID string.
+		if row.ClassID.Valid {
+			resp.ClassID = uuid.UUID(row.ClassID.Bytes).String()
+		}
+
+		// ClassName is a nullable *string — only include if the child is enrolled.
+		if row.ClassName != nil {
+			resp.ClassName = *row.ClassName
+		}
+
+		// ClassEducationLevel is a NullEducationLevel (custom nullable type generated
+		// by sqlc). Valid=true means the column had a non-NULL value.
+		if row.ClassEducationLevel.Valid {
+			resp.ClassEducationLevel = string(row.ClassEducationLevel.EducationLevel)
+		}
+
+		result = append(result, resp)
+	}
+
+	// Step 5: Return the list wrapped in the standard { "data": [...] } envelope.
+	httputil.Success(w, result)
+}
+
 
 // generateActivationToken creates a cryptographically random 64-character hex
 // string suitable for use as an activation token. It is not used directly by

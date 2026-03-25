@@ -266,7 +266,11 @@ func run() error {
 			// GET /users — list all active users in the school (admin/secretary only).
 			r.With(auth.RequireRole("admin", "secretary")).Get("/users", userHandler.ListUsers)
 
-			r.Get("/users/me/children", notImplemented)
+			// GET /users/me/children — list children linked to the current user.
+			// Accessible to ALL authenticated users (not restricted to parents).
+			// A teacher may also want to see which children are linked to their
+			// parent accounts for class communication purposes.
+			r.Get("/users/me/children", userHandler.ListChildren)
 
 			// GDPR
 			r.Post("/users/me/gdpr/consent", notImplemented)

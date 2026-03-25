@@ -49,8 +49,15 @@ UPDATE users SET totp_secret = $2, totp_enabled = true, updated_at = now() WHERE
 UPDATE users SET last_login_at = now() WHERE id = $1;
 
 -- name: ListChildrenForParent :many
-SELECT u.* FROM users u
+-- Returns all children linked to the given parent, with their current class info.
+-- Joins through class_enrollments and classes to get the class name and education level.
+-- If a child is not enrolled in any class, class fields will be NULL.
+SELECT u.id, u.first_name, u.last_name, u.email, u.role,
+    c.id AS class_id, c.name AS class_name, c.education_level AS class_education_level
+FROM users u
 JOIN parent_student_links psl ON psl.student_id = u.id
+LEFT JOIN class_enrollments ce ON ce.student_id = u.id AND ce.withdrawn_at IS NULL
+LEFT JOIN classes c ON c.id = ce.class_id
 WHERE psl.parent_id = $1;
 
 -- name: GetUserByEmailForLogin :one
