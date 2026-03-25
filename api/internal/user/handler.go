@@ -35,8 +35,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -771,24 +773,26 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	// Step 3: Parse the JSON request body.
 	// We decode into updateProfileRequest where both fields are *string (nullable).
 	// A missing field stays nil (no update); an explicit null also stays nil.
-	// An empty body is valid — it produces a no-op update that returns current values.
+	// An empty body (io.EOF) is valid — it produces a no-op update that returns
+	// the current values unchanged.
 	var req updateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
 		// Body is present but not valid JSON — return 400.
 		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
 		return
 	}
 
 	// Step 4: Validate the email format if a new email is provided.
-	// We do a minimal check (must contain "@") rather than full RFC 5321 parsing.
-	// The DB unique constraint handles duplicate emails; format extremes are rare
-	// in a closed school system where admins provision accounts.
-	// An empty string ("") is treated as an invalid email — use null/omit to keep current.
+	// We use Go's net/mail.ParseAddress which validates against RFC 5322.
+	// This catches edge cases like "@", "user@", "@domain.com", and missing TLDs
+	// while still accepting valid formats like "user+tag@sub.domain.co.uk".
 	if req.Email != nil {
-		if !strings.Contains(*req.Email, "@") {
-			httputil.BadRequest(w, "INVALID_EMAIL", "Email must contain '@'")
+		trimmed := strings.TrimSpace(*req.Email)
+		if _, err := mail.ParseAddress(trimmed); err != nil {
+			httputil.BadRequest(w, "INVALID_EMAIL", "Email must be a valid email address")
 			return
 		}
+		req.Email = &trimmed
 	}
 
 	// Step 5: Run the UPDATE query.
