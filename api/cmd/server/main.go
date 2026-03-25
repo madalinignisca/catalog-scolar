@@ -243,8 +243,12 @@ func run() error {
 			r.Use(auth.TenantContext(db.Pool))
 
 			// Auth (2FA setup/verification — requires being logged in)
-			r.Post("/auth/2fa/setup", notImplemented)
-			r.Post("/auth/2fa/verify", notImplemented)
+			// Handle2FASetup generates a TOTP secret + QR URL for the user
+			// to scan with their authenticator app. The secret is NOT saved yet.
+			// Handle2FAVerify receives the secret back with the first valid code;
+			// only after validation does it persist the secret and set totp_enabled.
+			r.Post("/auth/2fa/setup", auth.Handle2FASetup())
+			r.Post("/auth/2fa/verify", auth.Handle2FAVerify())
 
 			// Users (provisioning and profile)
 			r.Get("/users/me", auth.HandleGetProfile(queries))

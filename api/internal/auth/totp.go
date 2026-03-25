@@ -26,11 +26,13 @@ package auth
 //  5. Server stores the TOTP secret and sets totp_enabled=true
 
 import (
+	"encoding/base32"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -173,6 +175,231 @@ func HandleMFALogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 				RefreshToken: refreshToken,
 				TokenType:    "Bearer",
 				ExpiresIn:    int(AccessTokenDuration.Seconds()),
+			},
+		})
+	}
+}
+
+// =============================================================================
+// Request types for 2FA setup endpoints
+// =============================================================================
+
+// setupResponse is the JSON body returned by POST /auth/2fa/setup.
+// The client uses it to display a QR code in the authenticator-app setup UI.
+// The secret is returned in base32 format for manual entry fallback.
+// NOTE: the secret is NOT yet stored in the database at this point — it is
+// only saved after the user successfully verifies a code in /auth/2fa/verify.
+type setupResponse struct {
+	// Secret is the raw base32-encoded TOTP secret (e.g. "JBSWY3DPEHPK3PXP").
+	// The user can type this manually into their authenticator app if scanning
+	// the QR code is not possible.
+	Secret string `json:"secret"`
+
+	// URL is the otpauth:// URI used to generate the QR code.
+	// Format: otpauth://totp/CatalogRO:<email>?secret=<secret>&issuer=CatalogRO
+	// Any authenticator app (Google Authenticator, Authy, 1Password) accepts this.
+	URL string `json:"url"`
+}
+
+// verifyRequest is the expected JSON body for POST /auth/2fa/verify.
+// The client sends back the same secret it received from /auth/2fa/setup along
+// with the first valid code from the user's authenticator app. Returning the
+// secret (rather than the server looking it up from DB) is intentional: it
+// proves that the client actually stored the secret before asking us to enable
+// 2FA — a secret never used can never be lost.
+type verifyRequest struct {
+	// Secret is the base32 TOTP secret the client received from /auth/2fa/setup.
+	// The server validates this format before using it so that garbage input
+	// is rejected with a clear 400, not a silent crypto error.
+	Secret string `json:"secret"`
+
+	// Code is the 6-digit TOTP code from the user's authenticator app.
+	// It must be valid for the supplied secret at the current time.
+	Code string `json:"code"`
+}
+
+// =============================================================================
+// Handle2FASetup — POST /auth/2fa/setup
+// =============================================================================
+
+// Handle2FASetup returns an http.HandlerFunc that generates a new TOTP secret
+// and QR code URL for the authenticated user.
+//
+// This is step 1 of the 2FA enrollment flow:
+//  1. Get the authenticated user's ID from the JWT context.
+//  2. Look up the user's email so we can use it as the TOTP account name
+//     (the label shown in the authenticator app, e.g. "CatalogRO:user@school.ro").
+//  3. Call GenerateTOTPSecret to create a fresh random secret + otpauth URL.
+//  4. Return both to the client — the client renders the QR code.
+//
+// IMPORTANT: the secret is NOT saved to the database here.
+// The two-step flow (generate → verify) prevents storing a secret the user
+// never confirmed. The secret is only persisted in Handle2FAVerify after the
+// user proves they can generate a valid code from it.
+//
+// Parameters:
+//   - db: sqlc Queries (used to look up the user's email by their UUID)
+func Handle2FASetup() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get the transaction-scoped queries from context.
+		// TenantContext middleware sets this up — it includes RLS scope.
+		db := GetQueries(r.Context())
+		if db == nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Database context unavailable")
+			return
+		}
+
+		// Step 2: Extract the authenticated user's ID from the JWT claims.
+		claims := GetClaims(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+			return
+		}
+
+		userID, err := uuid.Parse(claims.UserID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid user ID in token")
+			return
+		}
+
+		// Step 3: Fetch the user to get their email for the authenticator label.
+		user, err := db.GetUserByID(r.Context(), userID)
+		if err != nil {
+			slog.Error("2fa setup: failed to query user", "user_id", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred")
+			return
+		}
+
+		// Resolve the display email. Email is a nullable column (users can be
+		// provisioned without one). Fall back to "unknown" to avoid a nil dereference;
+		// in practice every user who reaches this endpoint will have an email.
+		accountName := "unknown"
+		if user.Email != nil && *user.Email != "" {
+			accountName = *user.Email
+		}
+
+		// Step 3: Generate a fresh TOTP secret + QR URL.
+		// GenerateTOTPSecret delegates to pquerna/otp which creates a
+		// cryptographically random base32 secret and builds the otpauth:// URI.
+		secret, qrURL, err := GenerateTOTPSecret("CatalogRO", accountName)
+		if err != nil {
+			slog.Error("2fa setup: failed to generate TOTP key", "user_id", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to generate 2FA secret")
+			return
+		}
+
+		// Step 4: Return the secret and QR URL to the client.
+		// The client should render the URL as a QR code using a library like
+		// qrcode.js. The secret can also be shown as a plain-text fallback
+		// ("Can't scan? Enter this code manually").
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"data": setupResponse{
+				Secret: secret,
+				URL:    qrURL,
+			},
+		})
+	}
+}
+
+// =============================================================================
+// Handle2FAVerify — POST /auth/2fa/verify
+// =============================================================================
+
+// Handle2FAVerify returns an http.HandlerFunc that validates the first TOTP code
+// from a newly enrolled authenticator app and permanently enables 2FA for the user.
+//
+// This is step 2 of the 2FA enrollment flow:
+//  1. Get the authenticated user's ID from the JWT context.
+//  2. Parse the request body: { "secret": "BASE32SECRET", "code": "123456" }.
+//  3. Validate the TOTP code against the provided secret using totp.Validate.
+//  4. If valid, persist the secret with SetTOTPSecret (sets totp_enabled=true).
+//  5. Return { "data": { "enabled": true } } to confirm enrollment.
+//  6. If the code is wrong, return 400 INVALID_CODE.
+//
+// The two-step design (setup generates secret, verify saves it) is deliberate:
+//   - It ensures the user actually scanned the QR code and can generate codes.
+//   - It prevents saving orphaned secrets if the user closes the setup UI early.
+//   - It mirrors the industry-standard enrollment pattern (GitHub, AWS, etc.).
+//
+// Parameters:
+//   - db: sqlc Queries (used to persist the verified secret)
+func Handle2FAVerify() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get transaction-scoped queries from context.
+		db := GetQueries(r.Context())
+		if db == nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Database context unavailable")
+			return
+		}
+
+		// Step 2: Extract the authenticated user's ID.
+		claims := GetClaims(r.Context())
+		if claims == nil {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+			return
+		}
+
+		userID, err := uuid.Parse(claims.UserID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid user ID in token")
+			return
+		}
+
+		// Step 2: Parse the request body.
+		// We expect both fields — missing either is a client error.
+		var req verifyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body")
+			return
+		}
+
+		if req.Secret == "" || req.Code == "" {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Secret and code are required")
+			return
+		}
+
+		// Validate and normalize the secret as base32 (uppercase, padded).
+		// The pquerna/otp library expects valid base32 — garbage input would
+		// cause confusing errors. This gives a clear "bad format" response instead.
+		secretUpper := strings.ToUpper(req.Secret)
+		if _, err := base32.StdEncoding.DecodeString(secretUpper); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid secret format; must be a base32 string")
+			return
+		}
+
+		// Step 3: Validate the TOTP code.
+		// totp.Validate checks the code against the secret at the current time,
+		// accepting +/- one time step (90-second effective window) to account
+		// for clock skew between the user's phone and the server.
+		if !totp.Validate(req.Code, secretUpper) {
+			// Invalid code — tell the client to try again. We use INVALID_CODE
+			// so the UI can show a specific error message (e.g., "Incorrect code.
+			// Make sure your phone's clock is correct and try again.").
+			writeError(w, http.StatusBadRequest, "INVALID_CODE", "The verification code is incorrect")
+			return
+		}
+
+		// Step 4: Persist the secret and enable 2FA for this user.
+		// SetTOTPSecret runs: UPDATE users SET totp_secret=$2, totp_enabled=true WHERE id=$1
+		// We store the secret as raw bytes (the base32 string). In production,
+		// this should be encrypted with the TOTP_ENCRYPTION_KEY env var before storage.
+		if err := db.SetTOTPSecret(r.Context(), generated.SetTOTPSecretParams{
+			ID:         userID,
+			TotpSecret: []byte(secretUpper),
+		}); err != nil {
+			slog.Error("2fa verify: failed to save TOTP secret", "user_id", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to enable 2FA")
+			return
+		}
+
+		slog.Info("2fa verify: 2FA enabled for user", "user_id", userID)
+
+		// Step 5: Confirm that 2FA is now enabled.
+		// The client can use this to show a success screen and redirect to login
+		// (or the user's dashboard if they are already in a session).
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"data": map[string]bool{
+				"enabled": true,
 			},
 		})
 	}
