@@ -1,10 +1,15 @@
 /**
  * Typed fetch wrapper for the CatalogRO API.
- * Handles JWT auth, token refresh, and tenant headers.
+ *
+ * Authentication uses httpOnly cookies set by the Go API on login/refresh.
+ * The browser sends these cookies automatically with every request via
+ * `credentials: 'include'`. This works for both client-side navigation
+ * and Nuxt SSR (where localStorage is unavailable).
+ *
+ * The old localStorage-based token storage (getAccessToken, setTokens,
+ * clearTokens) is kept as no-ops for backward compatibility — callers
+ * that still reference them won't break, but the functions do nothing.
  */
-
-const TOKEN_KEY = 'catalogro_access_token';
-const REFRESH_KEY = 'catalogro_refresh_token';
 
 function getApiBase(): string {
   // Check for explicit override via env var first (works in both client and server).
@@ -25,21 +30,38 @@ function getApiBase(): string {
   return envBase !== undefined && envBase !== '' ? envBase : 'http://localhost:8080/api/v1';
 }
 
+/**
+ * No-op — kept for backward compatibility.
+ * Auth tokens are now stored in httpOnly cookies, not localStorage.
+ * Always returns null because the cookie is httpOnly (JS can't read it).
+ */
 export function getAccessToken(): string | null {
-  if (!import.meta.client) return null;
-  return localStorage.getItem(TOKEN_KEY);
+  return null;
 }
 
-export function setTokens(access: string, refresh: string): void {
-  if (!import.meta.client) return;
-  localStorage.setItem(TOKEN_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
+/**
+ * No-op — kept for backward compatibility.
+ * Auth tokens are now set as httpOnly cookies by the Go API response.
+ * Callers that still reference setTokens() (e.g., useAuth.login) won't
+ * break — the function simply does nothing because the API already set
+ * the cookies in the HTTP response headers.
+ */
+export function setTokens(_access: string, _refresh: string): void {
+  // Intentionally empty — cookies are set by the API, not by JS.
 }
 
+/**
+ * No-op — kept for backward compatibility.
+ * Cookie clearing is handled server-side by the logout endpoint
+ * (which sets MaxAge=-1 on both cookies).
+ */
 export function clearTokens(): void {
-  if (!import.meta.client) return;
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(REFRESH_KEY);
+  // Intentionally empty — cookies are cleared by the logout API response.
+  // Also clean up any leftover localStorage keys from before the migration.
+  if (import.meta.client) {
+    localStorage.removeItem('catalogro_access_token');
+    localStorage.removeItem('catalogro_refresh_token');
+  }
 }
 
 interface ApiOptions {
@@ -56,11 +78,6 @@ interface ApiErrorBody {
   };
 }
 
-interface RefreshResponse {
-  access_token: string;
-  refresh_token: string;
-}
-
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const base = getApiBase();
   const url = `${base}${path}`;
@@ -70,17 +87,17 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     ...options.headers,
   };
 
-  if (!options.skipAuth) {
-    const token = getAccessToken();
-    if (token !== null && token !== '') {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-  }
+  // No Authorization header needed — httpOnly cookies are sent automatically
+  // by the browser when credentials: 'include' is set on the fetch call.
 
   const response = await fetch(url, {
     method: options.method ?? 'GET',
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    // credentials: 'include' tells the browser to send cookies with this
+    // request, even for cross-origin calls (e.g., localhost:3000 → localhost:8080).
+    // Without this, the httpOnly auth cookies would not be included.
+    credentials: 'include',
   });
 
   // Token expired — try refresh
@@ -148,30 +165,35 @@ function snakeToCamel(data: unknown): unknown {
   return data;
 }
 
+/**
+ * Attempts to refresh the access token by calling POST /auth/refresh.
+ *
+ * With cookie-based auth, the refresh token is stored in an httpOnly cookie
+ * scoped to /api/v1/auth/refresh. The browser sends it automatically when
+ * we call the refresh endpoint with credentials: 'include'. No need to
+ * read the token from localStorage or pass it in the JSON body — the
+ * cookie handles everything.
+ *
+ * On success, the API response sets new cookies (token rotation) and we
+ * return true so the caller can retry the original request.
+ */
 async function tryRefreshToken(): Promise<boolean> {
-  if (!import.meta.client) return false;
-  const refreshToken = localStorage.getItem(REFRESH_KEY);
-  if (refreshToken === null || refreshToken === '') return false;
-
   try {
     const base = getApiBase();
     const response = await fetch(`${base}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      // Send an empty JSON body — the refresh token comes from the cookie.
+      // The Go API's HandleRefresh reads from cookie first, JSON body second.
+      body: JSON.stringify({}),
+      // credentials: 'include' is critical here — it sends the refresh token
+      // cookie (scoped to /api/v1/auth/refresh) with this request.
+      credentials: 'include',
     });
 
-    if (!response.ok) return false;
-
-    // Unwrap the { data: ... } envelope, same as the main api() function
-    const body: unknown = await response.json();
-    const inner =
-      typeof body === 'object' && body !== null && 'data' in body
-        ? (body as Record<string, unknown>)['data']
-        : body;
-    const data = inner as RefreshResponse;
-    setTokens(data.access_token, data.refresh_token);
-    return true;
+    // If the refresh succeeded, the API response already set new cookies
+    // (access + refresh). No need to manually store anything.
+    return response.ok;
   } catch {
     return false;
   }

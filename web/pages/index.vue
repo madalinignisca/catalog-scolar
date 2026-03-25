@@ -95,7 +95,7 @@ const childrenError = ref<string | null>(null);
  * Fetches the list of children linked to the logged-in parent account.
  *
  * Calls GET /api/v1/users/me/children. The api() wrapper:
- *   1. Attaches the JWT access token from localStorage
+ *   1. Sends the httpOnly auth cookie automatically (credentials: 'include')
  *   2. Unwraps the { "data": [...] } envelope
  *   3. Converts snake_case keys to camelCase (first_name → firstName, etc.)
  *
@@ -124,15 +124,15 @@ async function fetchChildren(): Promise<void> {
 /**
  * On mount: check authentication and load data.
  *
- * We do this in onMounted (not at setup time) because:
- * 1. localStorage is only available on the client
- * 2. fetchProfile() is async and needs to complete before we check isAuthenticated
- * 3. The auth state (user ref) may be empty if this is a fresh page load
- *    (e.g., after login redirected here, or browser refresh)
+ * With cookie-based auth, we don't need to check localStorage for a token.
+ * Instead, we just call fetchProfile() — the httpOnly cookie is sent
+ * automatically with the request (via credentials: 'include' in the api()
+ * wrapper). If the cookie is missing or expired, fetchProfile() sets
+ * user to null and we redirect to /login.
  */
 onMounted(async () => {
-  // If user state is empty but we have a token, try to restore the session
-  // by fetching the profile from the API.
+  // If user state is empty, try to restore the session by fetching the
+  // profile from the API. The httpOnly cookie handles authentication.
   const { fetchProfile } = useAuth();
   if (!isAuthenticated.value) {
     await fetchProfile();

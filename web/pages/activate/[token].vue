@@ -77,6 +77,9 @@ async function handleActivate() {
     }>('/api/v1/auth/activate', {
       method: 'POST',
       body,
+      // credentials: 'include' ensures the browser stores the httpOnly auth
+      // cookies from the API response (cross-origin: localhost:3000 → :8080).
+      credentials: 'include',
     });
 
     if (response.mfa_setup_required === true) {
@@ -85,7 +88,9 @@ async function handleActivate() {
         '/api/v1/auth/2fa/setup',
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${response.access_token ?? ''}` },
+          // The access token cookie was set by the activate response above.
+          // credentials: 'include' sends it with this cross-origin request.
+          credentials: 'include',
         },
       );
       totpSecret.value = setup.data.secret;
@@ -97,9 +102,8 @@ async function handleActivate() {
       response.refresh_token !== undefined &&
       response.refresh_token !== ''
     ) {
-      // Direct login (parents/students)
-      const { setTokens } = await import('~/lib/api');
-      setTokens(response.access_token, response.refresh_token);
+      // Direct login (parents/students) — cookies are set by the API response.
+      // No need to manually store tokens; httpOnly cookies handle auth.
       state.value = 'done';
       setTimeout(() => {
         void navigateTo('/');
@@ -118,16 +122,18 @@ async function handleVerify2fa() {
   error.value = '';
 
   try {
-    const response = await $fetch<{ access_token: string; refresh_token: string }>(
+    await $fetch<{ access_token: string; refresh_token: string }>(
       '/api/v1/auth/2fa/verify',
       {
         method: 'POST',
         body: { totp_code: totpCode.value },
+        // Send the access token cookie (set during activation) and store
+        // any new cookies from the response.
+        credentials: 'include',
       },
     );
 
-    const { setTokens } = await import('~/lib/api');
-    setTokens(response.access_token, response.refresh_token);
+    // Cookies are set by the API response — no manual token storage needed.
     state.value = 'done';
     setTimeout(() => {
       void navigateTo('/');

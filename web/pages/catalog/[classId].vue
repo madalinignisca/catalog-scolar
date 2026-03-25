@@ -40,15 +40,11 @@ const classId = computed(() => route.params.classId as string);
 
 /**
  * Get the current user — we need their ID to filter the teacher's subjects.
+ * With cookie-based auth, the auth check happens server-side via the httpOnly
+ * cookie. If the user is not authenticated, the API returns 401 and the
+ * fetchClasses call in onMounted will redirect to /login via the api() wrapper.
  */
-const { user, isAuthenticated } = useAuth();
-
-/**
- * Redirect to login if not authenticated.
- */
-if (import.meta.client && !isAuthenticated.value) {
-  void navigateTo('/login');
-}
+const { user } = useAuth();
 
 // ── Catalog data ───────────────────────────────────────────────────────────
 
