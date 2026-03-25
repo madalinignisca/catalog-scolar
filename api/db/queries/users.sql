@@ -97,6 +97,9 @@ UPDATE users SET
 WHERE id = $1;
 
 -- name: GetUserDataExport :one
--- Returns all data for a user including their profile. Used for GDPR data export.
--- Children grades/absences are fetched separately by the handler.
-SELECT * FROM users WHERE id = $1;
+-- Returns profile data for GDPR export. Explicitly lists columns to EXCLUDE
+-- sensitive fields (password_hash, totp_secret, activation_token) at the SQL
+-- level, preventing them from ever entering application memory.
+SELECT id, school_id, role, email, phone, first_name, last_name,
+    is_active, gdpr_consent_at, activated_at, last_login_at, created_at
+FROM users WHERE id = $1;

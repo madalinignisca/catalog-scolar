@@ -1033,9 +1033,9 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Fetch the user's full profile from the database.
-	// GetUserDataExport returns the complete users row. We will filter out
-	// sensitive fields when building the response (see gdprExportProfile above).
+	// Step 3: Fetch the user's profile from the database.
+	// GetUserDataExport explicitly selects only non-sensitive columns at the SQL
+	// level — password_hash, totp_secret, and activation_token never enter memory.
 	u, err := queries.GetUserDataExport(r.Context(), userID)
 	if err != nil {
 		h.logger.Error("export_data: failed to fetch user profile",
@@ -1046,10 +1046,8 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Build the safe profile export — strip all security-sensitive fields.
-	// password_hash:    cleared — never expose password material
-	// totp_secret:      cleared — would allow an attacker to clone the user's 2FA
-	// activation_token: cleared — single-use token, no reason to expose it in export
+	// Step 4: Build the export profile from the safe query result.
+	// The SQL query already excludes sensitive columns — no filtering needed here.
 	profile := gdprExportProfile{
 		ID:        u.ID.String(),
 		SchoolID:  u.SchoolID.String(),
