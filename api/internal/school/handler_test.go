@@ -969,3 +969,418 @@ func TestUpdateClass_NotFound(t *testing.T) {
 			rr.Code, rr.Body.String())
 	}
 }
+
+// ===========================================================================
+// Enrollment tests — POST /classes/{classId}/enroll
+//                    DELETE /classes/{classId}/enroll/{studentId}
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Enrollment test helpers
+// ---------------------------------------------------------------------------
+
+// postEnrollJSON builds an *http.Request for POST /classes/{classId}/enroll
+// with a JSON body. The classId is injected into the chi route context so that
+// chi.URLParam(r, "classId") works when the handler is called directly.
+func postEnrollJSON(t *testing.T, classID string, body any) *http.Request {
+	t.Helper()
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("postEnrollJSON: marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/classes/"+classID+"/enroll", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Inject chi URL parameters so the handler can read {classId} via chi.URLParam.
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("classId", classID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
+}
+
+// deleteEnrollJSON builds an *http.Request for
+// DELETE /classes/{classId}/enroll/{studentId} with both URL params injected
+// into the chi route context.
+func deleteEnrollJSON(t *testing.T, classID, studentID string) *http.Request {
+	t.Helper()
+
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		"/classes/"+classID+"/enroll/"+studentID,
+		http.NoBody,
+	)
+
+	// Inject both URL parameters so chi.URLParam works when bypassing the router.
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("classId", classID)
+	rctx.URLParams.Add("studentId", studentID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
+}
+
+// decodeEnrollData decodes the { "data": {...} } envelope from an enrollment response.
+func decodeEnrollData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeEnrollData: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Data
+}
+
+// decodeEnrollError decodes the { "error": { "code": ..., "message": ... } } envelope.
+func decodeEnrollError(t *testing.T, rr *httptest.ResponseRecorder) (code, message string) {
+	t.Helper()
+
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeEnrollError: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Error.Code, env.Error.Message
+}
+
+// insertEnrollmentDirect inserts a class_enrollments row directly via the pool
+// (bypassing RLS and the test transaction rollback). This is used to pre-populate
+// an enrollment so that a subsequent handler call triggers the duplicate constraint.
+//
+// The same pattern is used by insertSubjectDirect and insertClassDirect.
+func insertEnrollmentDirect(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	schoolID, classID, studentID uuid.UUID,
+) {
+	t.Helper()
+
+	ctx := context.Background()
+	id := uuid.NewSHA1(uuid.NameSpaceURL,
+		[]byte(fmt.Sprintf("catalogro-test-enrollment-%s-%s-%s", schoolID, classID, studentID)))
+
+	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO class_enrollments (id, school_id, class_id, student_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO NOTHING`,
+		id, schoolID, classID, studentID,
+	)
+	if err != nil {
+		t.Fatalf("insertEnrollmentDirect: insert enrollment: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 11: EnrollStudent — success (POST /classes/{classId}/enroll)
+// ---------------------------------------------------------------------------
+
+// TestEnrollStudent_Success verifies the happy path for the enroll endpoint.
+//
+// Scenario:
+//   - A secretary sends a valid JSON body with a real student UUID.
+//   - The handler should return HTTP 201 Created with an enrollment record
+//     containing: id (UUID), class_id, and student_id.
+//   - The returned class_id and student_id must match what we sent.
+func TestEnrollStudent_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	secretaryID := users["secretary"]
+	teacherID := users["teacher"]
+	studentID := users["student"]
+
+	// SeedClass creates a class and a subject but does NOT automatically enrol
+	// our "student" user a second time — actually SeedClass does enrol the student.
+	// We need a fresh class without any pre-existing enrollment for the student.
+	// Create a separate class directly so we get a clean slate.
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+	classID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-enroll-class-fresh"))
+
+	ctx := context.Background()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("TestEnrollStudent_Success: acquire connection: %v", err)
+	}
+	testutil.SetTenantOnConn(t, conn, school1ID)
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO classes (id, school_id, school_year_id, name, education_level, grade_number, homeroom_teacher_id)
+		VALUES ($1, $2, $3, $4, 'middle'::education_level, 7, $5)
+		ON CONFLICT (id) DO NOTHING`,
+		classID, school1ID, schoolYearID, "7E-enroll-test", teacherID)
+	conn.Release()
+	if err != nil {
+		t.Fatalf("TestEnrollStudent_Success: insert class: %v", err)
+	}
+
+	// -----------------------------------------------------------------------
+	// 2. Build the enroll request.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"student_id": studentID.String(),
+	}
+	req := postEnrollJSON(t, classID.String(), body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject auth + tenant context as secretary.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantCtx(t, pool, req, school1ID, secretaryID, "secretary")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.EnrollStudent(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 201 Created.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("EnrollStudent: expected 201, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode and assert the response body.
+	// -----------------------------------------------------------------------
+	data := decodeEnrollData(t, rr)
+
+	// id must be a valid UUID.
+	enrollID, ok := data["id"].(string)
+	if !ok || enrollID == "" {
+		t.Errorf("EnrollStudent: expected non-empty 'id' in response, got: %v", data["id"])
+	}
+	if _, err := uuid.Parse(enrollID); err != nil {
+		t.Errorf("EnrollStudent: 'id' is not a valid UUID: %q", enrollID)
+	}
+
+	// class_id must match what we sent.
+	if cid, _ := data["class_id"].(string); cid != classID.String() {
+		t.Errorf("EnrollStudent: expected class_id=%s, got %q", classID, cid)
+	}
+
+	// student_id must match what we sent.
+	if sid, _ := data["student_id"].(string); sid != studentID.String() {
+		t.Errorf("EnrollStudent: expected student_id=%s, got %q", studentID, sid)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 12: EnrollStudent — duplicate enrollment → 409 Conflict
+// ---------------------------------------------------------------------------
+
+// TestEnrollStudent_Duplicate verifies that enrolling the same student twice
+// in the same class returns HTTP 409 Conflict.
+//
+// The class_enrollments table has UNIQUE(class_id, student_id). We pre-insert
+// an enrollment via insertEnrollmentDirect (committed immediately), then call
+// the handler with the same (class_id, student_id) pair.
+func TestEnrollStudent_Duplicate(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	secretaryID := users["secretary"]
+	teacherID := users["teacher"]
+	studentID := users["student"]
+
+	// Create a dedicated class for this test.
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+	classID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-enroll-class-dup"))
+
+	ctx := context.Background()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("TestEnrollStudent_Duplicate: acquire connection: %v", err)
+	}
+	testutil.SetTenantOnConn(t, conn, school1ID)
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO classes (id, school_id, school_year_id, name, education_level, grade_number, homeroom_teacher_id)
+		VALUES ($1, $2, $3, $4, 'middle'::education_level, 7, $5)
+		ON CONFLICT (id) DO NOTHING`,
+		classID, school1ID, schoolYearID, "7E-dup-test", teacherID)
+	conn.Release()
+	if err != nil {
+		t.Fatalf("TestEnrollStudent_Duplicate: insert class: %v", err)
+	}
+
+	// -----------------------------------------------------------------------
+	// 2. Pre-insert an enrollment so the unique constraint is already active.
+	// -----------------------------------------------------------------------
+	// insertEnrollmentDirect commits immediately (bypasses the test transaction
+	// rollback), so the UNIQUE(class_id, student_id) constraint is enforced when
+	// the handler tries to insert the same pair.
+	insertEnrollmentDirect(t, pool, school1ID, classID, studentID)
+
+	// -----------------------------------------------------------------------
+	// 3. Build the request with the same student.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"student_id": studentID.String(),
+	}
+	req := postEnrollJSON(t, classID.String(), body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, secretaryID, "secretary")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler and assert 409 Conflict.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.EnrollStudent(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("EnrollStudent (duplicate): expected 409, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	code, _ := decodeEnrollError(t, rr)
+	if code != "DUPLICATE_ENROLLMENT" {
+		t.Errorf("EnrollStudent (duplicate): expected error code 'DUPLICATE_ENROLLMENT', got %q", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: EnrollStudent — invalid student_id → 400 Bad Request
+// ---------------------------------------------------------------------------
+
+// TestEnrollStudent_InvalidStudentID verifies that sending a non-UUID string
+// as student_id causes the handler to return HTTP 400 Bad Request with the
+// error code INVALID_STUDENT_ID.
+//
+// The handler must validate the student_id field before attempting any database
+// operation. A raw DB error from an invalid UUID would be less user-friendly
+// and could leak internal details.
+func TestEnrollStudent_InvalidStudentID(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database — we still need a valid auth context.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	secretaryID := users["secretary"]
+
+	// Use any valid-looking class UUID — the handler validates student_id first,
+	// so the class does not need to exist for this validation test.
+	classID := uuid.New()
+
+	// -----------------------------------------------------------------------
+	// 2. Build a request with a non-UUID student_id.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"student_id": "not-a-uuid", // invalid UUID format
+	}
+	req := postEnrollJSON(t, classID.String(), body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, secretaryID, "secretary")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler and assert 400 Bad Request.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.EnrollStudent(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("EnrollStudent (invalid student_id): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	code, _ := decodeEnrollError(t, rr)
+	if code != "INVALID_STUDENT_ID" {
+		t.Errorf("EnrollStudent (invalid student_id): expected error code 'INVALID_STUDENT_ID', got %q", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: UnenrollStudent — success (DELETE /classes/{classId}/enroll/{studentId})
+// ---------------------------------------------------------------------------
+
+// TestUnenrollStudent_Success verifies the happy path for the unenroll endpoint.
+//
+// Scenario:
+//   - A student is pre-enrolled via insertEnrollmentDirect (committed to the DB).
+//   - A secretary sends DELETE /classes/{classId}/enroll/{studentId}.
+//   - The handler should return HTTP 204 No Content with an empty body.
+func TestUnenrollStudent_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	secretaryID := users["secretary"]
+	teacherID := users["teacher"]
+	studentID := users["student"]
+
+	// Create a dedicated class for this test.
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+	classID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-unenroll-class"))
+
+	ctx := context.Background()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("TestUnenrollStudent_Success: acquire connection: %v", err)
+	}
+	testutil.SetTenantOnConn(t, conn, school1ID)
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO classes (id, school_id, school_year_id, name, education_level, grade_number, homeroom_teacher_id)
+		VALUES ($1, $2, $3, $4, 'middle'::education_level, 7, $5)
+		ON CONFLICT (id) DO NOTHING`,
+		classID, school1ID, schoolYearID, "7E-unenroll-test", teacherID)
+	conn.Release()
+	if err != nil {
+		t.Fatalf("TestUnenrollStudent_Success: insert class: %v", err)
+	}
+
+	// -----------------------------------------------------------------------
+	// 2. Pre-enroll the student (committed, not rolled back, so the row exists
+	//    when the handler runs inside its own transaction).
+	// -----------------------------------------------------------------------
+	insertEnrollmentDirect(t, pool, school1ID, classID, studentID)
+
+	// -----------------------------------------------------------------------
+	// 3. Build the DELETE request.
+	// -----------------------------------------------------------------------
+	req := deleteEnrollJSON(t, classID.String(), studentID.String())
+	req, rollback := withTenantCtx(t, pool, req, school1ID, secretaryID, "secretary")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.UnenrollStudent(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 204 No Content.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("UnenrollStudent: expected 204, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// The response body must be empty for 204 — any body content is a protocol error.
+	if rr.Body.Len() != 0 {
+		t.Errorf("UnenrollStudent: expected empty body for 204, got %q", rr.Body.String())
+	}
+}
