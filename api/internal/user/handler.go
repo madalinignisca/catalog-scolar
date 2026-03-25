@@ -1,18 +1,22 @@
 // Package user implements HTTP handlers for user provisioning in the CatalogRO API.
 //
-// This file covers the three user management endpoints that allow school admins
-// and secretaries to create and inspect user accounts:
+// This file covers the user management endpoints that allow school admins
+// and secretaries to create and inspect user accounts, as well as the
+// self-service profile update endpoint for all authenticated users:
 //
 //	POST /users          — provision a new user (teacher, parent, student, etc.)
 //	GET  /users          — list all active users in the current school
 //	GET  /users/pending  — list users who have not yet completed account activation
+//	PUT  /users/me       — update the current user's own profile (email, phone)
 //
 // Authorization context:
-//   - All three endpoints are restricted to admin and secretary roles.
-//   - The RequireRole("admin", "secretary") middleware enforces this — it must be
-//     applied when these handlers are wired into the router (see cmd/server/main.go).
-//   - Row-Level Security (RLS) is set by TenantContext middleware before these handlers
-//     run, so all DB queries are automatically scoped to the current school.
+//   - POST /users, GET /users, and GET /users/pending are restricted to admin
+//     and secretary roles. RequireRole middleware enforces this.
+//   - PUT /users/me is accessible to ALL authenticated users. Each user can
+//     only update their own profile — the user ID always comes from the JWT,
+//     never from a URL parameter. This prevents horizontal privilege escalation.
+//   - Row-Level Security (RLS) is set by TenantContext middleware before these
+//     handlers run, so all DB queries are automatically scoped to the current school.
 //
 // Domain context:
 //   - In CatalogRO there is NO self-registration. Every account is provisioned by
@@ -22,6 +26,8 @@
 //   - The activation_token is a 32-byte random hex string. It is returned in the
 //     POST /users response so the secretary can share it with the user, and it is
 //     also used to build the activation URL.
+//   - SECURITY INVARIANT: UpdateProfile NEVER allows changing role, school_id, or
+//     is_active. Only email and phone are mutable via this endpoint.
 package user
 
 import (
@@ -31,6 +37,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -686,6 +693,133 @@ func (h *Handler) ListChildren(w http.ResponseWriter, r *http.Request) {
 	httputil.Success(w, result)
 }
 
+
+// =============================================================================
+// PUT /users/me — Update the current user's own profile
+// =============================================================================
+
+// updateProfileRequest is the JSON body for PUT /users/me.
+//
+// Both fields are optional. Omitting a field (or sending null) leaves the
+// corresponding column unchanged in the database (COALESCE semantics in SQL).
+// This means a client can update only the phone without touching the email,
+// and vice versa.
+//
+// SECURITY NOTE: This struct intentionally does NOT include role, school_id,
+// or is_active. Even if a malicious client sends those fields in the body, they
+// are silently ignored because we only read Email and Phone here. The underlying
+// SQL query also only updates email and phone — see UpdateUserProfile in users.sql.
+type updateProfileRequest struct {
+	// Email is the new email address. Optional — omit or send null to keep current.
+	// If provided, must contain "@" (basic format check). CatalogRO does not do
+	// full RFC 5321 validation here; the DB unique constraint prevents duplicates.
+	Email *string `json:"email,omitempty"`
+
+	// Phone is the new phone number. Optional — omit or send null to keep current.
+	// Format is not validated server-side (Romanian phone numbers vary in notation:
+	// "0741000001", "0741-000-001", "+40741000001" are all accepted).
+	Phone *string `json:"phone,omitempty"`
+}
+
+// UpdateProfile handles PUT /users/me.
+//
+// Allows any authenticated user to update their own email and/or phone number.
+// The user ID is taken from the JWT claims — users can NEVER update another
+// user's profile via this endpoint (no URL parameter for ID).
+//
+// Security invariant: role, school_id, and is_active are NOT updatable via this
+// endpoint. The SQL query (UpdateUserProfile) only touches email, phone, and
+// updated_at. The handler does not even read those fields from the request body.
+//
+// Handler flow:
+//  1. Retrieve the transaction-scoped Queries from context (RLS is active)
+//  2. Extract the current user's UUID from the JWT claims
+//  3. Parse and validate the JSON request body
+//  4. Validate email format if a new email is provided
+//  5. Call UpdateUserProfile with the new values (nulls preserved by COALESCE)
+//  6. Return 200 OK with the updated user data (safe fields only)
+//
+// Possible responses:
+//   - 200 OK:                  { "data": { "id": "...", "email": "...", ... } }
+//   - 400 Bad Request:         invalid JSON or invalid email format
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: DB failure
+func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Retrieve the transaction-scoped Queries from context.
+	// TenantContext middleware sets this up. All queries through this object
+	// are scoped to the authenticated user's school via PostgreSQL RLS.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		// Shouldn't happen if TenantContext is in the middleware chain.
+		h.logger.Error("update_profile: queries not found in context — is TenantContext middleware active?")
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Get the current user's UUID from the JWT claims.
+	// SECURITY: We ALWAYS use the ID from the JWT, never from a URL parameter.
+	// This means a user can only ever update their own profile. There is no way
+	// to escalate and update another user's record via this endpoint.
+	userID, err := auth.GetUserID(r.Context())
+	if err != nil {
+		// GetUserID only errors if claims are missing — JWTAuth should have caught this.
+		h.logger.Warn("update_profile: could not get user ID from context", "error", err)
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 3: Parse the JSON request body.
+	// We decode into updateProfileRequest where both fields are *string (nullable).
+	// A missing field stays nil (no update); an explicit null also stays nil.
+	// An empty body is valid — it produces a no-op update that returns current values.
+	var req updateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Body is present but not valid JSON — return 400.
+		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
+		return
+	}
+
+	// Step 4: Validate the email format if a new email is provided.
+	// We do a minimal check (must contain "@") rather than full RFC 5321 parsing.
+	// The DB unique constraint handles duplicate emails; format extremes are rare
+	// in a closed school system where admins provision accounts.
+	// An empty string ("") is treated as an invalid email — use null/omit to keep current.
+	if req.Email != nil {
+		if !strings.Contains(*req.Email, "@") {
+			httputil.BadRequest(w, "INVALID_EMAIL", "Email must contain '@'")
+			return
+		}
+	}
+
+	// Step 5: Run the UPDATE query.
+	// UpdateUserProfile uses COALESCE($2, email) and COALESCE($3, phone) in SQL,
+	// so a nil pointer means "keep the current value" — no explicit check needed here.
+	// SECURITY: The query only touches email, phone, and updated_at. Fields like
+	// role, school_id, and is_active are NOT part of the SET clause.
+	updated, err := queries.UpdateUserProfile(r.Context(), generated.UpdateUserProfileParams{
+		ID:    userID,
+		Email: req.Email,
+		Phone: req.Phone,
+	})
+	if err != nil {
+		// This could be a unique constraint violation (duplicate email) or another
+		// DB error. Log with the user ID for debugging.
+		h.logger.Error("update_profile: failed to update user",
+			"error", err,
+			"user_id", userID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 6: Map the updated user record to the safe API response shape.
+	// mapUserToResponse strips sensitive fields: password_hash, totp_secret,
+	// activation_token. This is the same helper used by ListUsers.
+	resp := mapUserToResponse(&updated)
+
+	// Return 200 OK — the profile was updated (or unchanged) successfully.
+	httputil.Success(w, resp)
+}
 
 // generateActivationToken creates a cryptographically random 64-character hex
 // string suitable for use as an activation token. It is not used directly by

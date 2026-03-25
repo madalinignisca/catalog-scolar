@@ -248,7 +248,11 @@ func run() error {
 
 			// Users (provisioning and profile)
 			r.Get("/users/me", auth.HandleGetProfile(queries))
-			r.Put("/users/me", notImplemented)
+			// PUT /users/me — any authenticated user can update their own email/phone.
+			// No role restriction: teachers, parents, students, admins can all use this.
+			// SECURITY: The handler reads the user ID from the JWT, not from the URL —
+			// users can only ever edit their own profile, never another user's.
+			r.Put("/users/me", userHandler.UpdateProfile)
 
 			// POST /users — provision a new user (admin/secretary only).
 			// RequireRole wraps only this route so teachers/parents get 403, not 501.

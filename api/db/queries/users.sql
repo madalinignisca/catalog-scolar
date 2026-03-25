@@ -66,6 +66,16 @@ WHERE psl.parent_id = $1;
 -- We filter by is_active to prevent disabled accounts from logging in.
 SELECT * FROM users WHERE email = $1 AND is_active = true;
 
+-- name: UpdateUserProfile :one
+-- Updates mutable profile fields for the current user.
+-- Only phone and email can be changed — role, school_id, is_active are immutable.
+UPDATE users SET
+    email = COALESCE($2, email),
+    phone = COALESCE($3, phone),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: LinkParentStudent :exec
 INSERT INTO parent_student_links (school_id, parent_id, student_id, relationship, is_primary)
 VALUES (current_school_id(), $1, $2, $3, $4);
