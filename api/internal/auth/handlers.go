@@ -214,7 +214,13 @@ func HandleLogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 			slog.Warn("login: failed to update last_login_at", "user_id", user.ID, "error", err)
 		}
 
-		// Return the token pair.
+		// Set httpOnly cookies so the browser (and Nuxt SSR) can send
+		// credentials automatically on subsequent requests. The JSON body
+		// is also returned for backward compatibility with non-browser API
+		// clients (e.g., mobile apps, CLI tools, Postman).
+		setAuthCookies(w, r, accessToken, refreshToken)
+
+		// Return the token pair in the JSON body as well.
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"data": tokenResponse{
 				AccessToken:  accessToken,
@@ -248,10 +254,22 @@ func HandleLogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 func HandleRefresh(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Parse the request body.
+		// The refresh token can come from either the JSON body (API clients)
+		// or from the httpOnly cookie (browser clients using cookie auth).
 		var req refreshRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body")
-			return
+			// Body may be empty for cookie-based requests — that's OK,
+			// we'll fall back to reading the cookie below.
+			req = refreshRequest{}
+		}
+
+		// If the JSON body didn't include a refresh token, try the cookie.
+		// The refresh token cookie has Path="/api/v1/auth/refresh" so it is
+		// only sent to this endpoint (not to every API call).
+		if req.RefreshToken == "" {
+			if cookie, err := r.Cookie("catalogro_refresh_token"); err == nil {
+				req.RefreshToken = cookie.Value
+			}
 		}
 
 		if req.RefreshToken == "" {
@@ -282,7 +300,7 @@ func HandleRefresh(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "User not found")
 				return
 			}
-			slog.Error("refresh: failed to query user", "user_id", userID, "error", err)
+			slog.Error("refresh: failed to query user", "user_id", parsedID.String(), "error", err) //nolint:gosec // G706 false positive — parsedID is a validated UUID, err is a DB driver error, neither is user-controlled log injection
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An unexpected error occurred")
 			return
 		}
@@ -313,6 +331,10 @@ func HandleRefresh(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 			return
 		}
 
+		// Set updated cookies with the new token pair (token rotation).
+		// The browser will replace the old cookies automatically.
+		setAuthCookies(w, r, accessToken, refreshToken)
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"data": tokenResponse{
 				AccessToken:  accessToken,
@@ -341,10 +363,14 @@ func HandleRefresh(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 //   - Optionally add the access token's JTI to a short-lived Redis blacklist
 func HandleLogout() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// For now, we return success. The client is responsible for deleting
-		// its stored tokens (localStorage, cookies, etc.).
+		// Clear the httpOnly auth cookies by setting MaxAge=-1.
+		// The browser will delete both cookies immediately.
+		// We also return a JSON success body for API clients that may
+		// rely on the response.
 		//
 		// TODO: Accept refresh_token in body and revoke it in Redis/DB.
+		clearAuthCookies(w, r)
+
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"data": map[string]string{
 				"message": "Logged out successfully",
@@ -698,6 +724,84 @@ func HandlePostActivation(db *generated.Queries) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+// =============================================================================
+// Cookie helpers — set and clear httpOnly JWT cookies on auth responses
+// =============================================================================
+
+// setAuthCookies writes the access and refresh tokens as httpOnly cookies.
+//
+// Why cookies instead of (only) JSON body?
+// Nuxt 3 uses SSR — the server-side render needs the JWT to make authenticated
+// API calls. localStorage is client-only, so it's invisible to SSR. httpOnly
+// cookies are sent automatically with every request (including SSR), solving
+// the "auth lost on page refresh" problem.
+//
+// Security properties of these cookies:
+//   - HttpOnly: true  — JavaScript cannot read the token (mitigates XSS theft)
+//   - Secure: auto    — true when the request came over TLS, false on plain HTTP
+//                        (allows dev on localhost without TLS while enforcing HTTPS in prod)
+//   - SameSite: Lax   — cookie is sent on same-site requests and top-level navigations
+//                        (protects against CSRF while allowing normal link clicks)
+//   - Path: the access token cookie is sent on all paths ("/"), but the refresh
+//     token cookie is scoped to "/api/v1/auth/refresh" so it is only sent when
+//     the client explicitly calls the refresh endpoint (minimizes exposure)
+//
+// Parameters:
+//   - w: the ResponseWriter to set cookies on
+//   - r: the incoming request (used to detect TLS via r.TLS)
+//   - accessToken: the short-lived JWT access token (15 min)
+//   - refreshToken: the longer-lived JWT refresh token (7 days)
+func setAuthCookies(w http.ResponseWriter, r *http.Request, accessToken, refreshToken string) {
+	// Access token cookie — sent with every API request.
+	// MaxAge = 900 seconds (15 minutes), matching the JWT's own expiry.
+	http.SetCookie(w, newAuthCookie("catalogro_access_token", accessToken, "/", int(AccessTokenDuration.Seconds()), r))
+
+	// Refresh token cookie — ONLY sent to the refresh endpoint.
+	// Restricting the Path means the refresh token is never included in
+	// regular API calls (e.g., GET /users/me), reducing the attack surface
+	// if an XSS vulnerability is found elsewhere.
+	// MaxAge = 604800 seconds (7 days), matching the refresh JWT's expiry.
+	http.SetCookie(w, newAuthCookie("catalogro_refresh_token", refreshToken, "/api/v1/auth/refresh", int(RefreshTokenDuration.Seconds()), r))
+}
+
+// clearAuthCookies removes the access and refresh token cookies by setting
+// MaxAge=-1, which tells the browser to delete them immediately.
+//
+// Called by HandleLogout so the browser stops sending credentials after logout.
+// We must set the same Path for each cookie — browsers only delete a cookie
+// when the name AND path match exactly.
+func clearAuthCookies(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, newAuthCookie("catalogro_access_token", "", "/", -1, r))
+	http.SetCookie(w, newAuthCookie("catalogro_refresh_token", "", "/api/v1/auth/refresh", -1, r))
+}
+
+// newAuthCookie builds an http.Cookie with security defaults appropriate for
+// JWT auth tokens. The Secure flag is set dynamically based on whether the
+// request arrived over TLS: true in production (behind Traefik with HTTPS),
+// false in local development (plain HTTP on localhost).
+//
+// All auth cookies share these properties:
+//   - HttpOnly: true  — JavaScript cannot read the token (mitigates XSS theft)
+//   - SameSite: Lax   — sent on same-site requests and top-level navigations
+//                        (protects against CSRF while allowing normal link clicks)
+func newAuthCookie(name, value, path string, maxAge int, r *http.Request) *http.Cookie {
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     path,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}
+	// In local development (no TLS), allow the cookie over plain HTTP.
+	// In production, r.TLS is non-nil so Secure stays true.
+	if r.TLS == nil {
+		cookie.Secure = false
+	}
+	return cookie
 }
 
 // =============================================================================

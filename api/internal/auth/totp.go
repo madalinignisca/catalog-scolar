@@ -168,6 +168,10 @@ func HandleMFALogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 			slog.Warn("2fa login: failed to update last_login_at", "user_id", user.ID, "error", err)
 		}
 
+		// Set httpOnly cookies so the browser (and Nuxt SSR) can send
+		// credentials automatically. Also return JSON body for non-browser clients.
+		setAuthCookies(w, r, accessToken, refreshToken)
+
 		// Return the token pair — authentication is now complete.
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"data": tokenResponse{
