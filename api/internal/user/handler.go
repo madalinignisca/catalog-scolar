@@ -213,15 +213,12 @@ func (h *Handler) ProvisionUser(w http.ResponseWriter, r *http.Request) {
 	// We use 32 bytes of cryptographic randomness from crypto/rand (NOT math/rand).
 	// Encoding as hex gives a 64-character string that is URL-safe.
 	// This token is single-use: it is cleared from the DB when the user activates.
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		// crypto/rand failure is extremely rare (kernel RNG not initialized),
-		// but we must handle it. Log with enough context for ops to investigate.
+	activationToken, err := generateActivationToken()
+	if err != nil {
 		h.logger.Error("provision_user: failed to generate activation token", "error", err)
 		httputil.InternalError(w)
 		return
 	}
-	activationToken := hex.EncodeToString(tokenBytes)
 
 	// Step 6: Get the provisioning user's ID from the JWT context.
 	// This is stored in the audit column users.provisioned_by so we can trace
@@ -465,35 +462,7 @@ func (h *Handler) ListPendingActivations(w http.ResponseWriter, r *http.Request)
 	// We only expose the fields the secretary needs to manage pending activations.
 	result := make([]pendingUserResponse, 0, len(pending))
 	for i := range pending {
-		u := &pending[i]
-
-		// Build the pending response — omit sensitive fields.
-		resp := pendingUserResponse{
-			ID:        u.ID.String(),
-			Role:      string(u.Role),
-			FirstName: u.FirstName,
-			LastName:  u.LastName,
-			CreatedAt: u.CreatedAt,
-		}
-
-		// Email is nullable — only set it if present.
-		if u.Email != nil {
-			resp.Email = *u.Email
-		}
-
-		// Phone is nullable — only set it if present.
-		if u.Phone != nil {
-			resp.Phone = *u.Phone
-		}
-
-		// ActivationSentAt is a pgtype.Timestamptz (nullable).
-		// Valid=true means the column is NOT NULL in the DB.
-		if u.ActivationSentAt.Valid {
-			t := u.ActivationSentAt.Time
-			resp.ActivationSentAt = &t
-		}
-
-		result = append(result, resp)
+		result = append(result, mapUserToPendingResponse(&pending[i]))
 	}
 
 	// Step 4: Return the list wrapped in the standard { "data": [...] } envelope.
@@ -541,6 +510,35 @@ func mapUserToResponse(u *generated.User) userResponse {
 	return resp
 }
 
+// mapUserToPendingResponse converts a generated.User database model to the
+// pending user API response struct. Similar to mapUserToResponse but includes
+// activation_sent_at instead of activated_at, and omits is_active (pending
+// users are always active — they just haven't set their password yet).
+func mapUserToPendingResponse(u *generated.User) pendingUserResponse {
+	resp := pendingUserResponse{
+		ID:        u.ID.String(),
+		Role:      string(u.Role),
+		FirstName: u.FirstName,
+		LastName:  u.LastName,
+		CreatedAt: u.CreatedAt,
+	}
+
+	if u.Email != nil {
+		resp.Email = *u.Email
+	}
+
+	if u.Phone != nil {
+		resp.Phone = *u.Phone
+	}
+
+	if u.ActivationSentAt.Valid {
+		t := u.ActivationSentAt.Time
+		resp.ActivationSentAt = &t
+	}
+
+	return resp
+}
+
 // generateActivationToken creates a cryptographically random 64-character hex
 // string suitable for use as an activation token. It is not used directly by
 // the handler (which inlines the generation) but is kept here for documentation
@@ -557,6 +555,3 @@ func generateActivationToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// Ensure generateActivationToken is referenced (avoids "declared and not used"
-// lint errors while keeping the function for documentation purposes).
-var _ = generateActivationToken
