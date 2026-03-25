@@ -66,6 +66,20 @@ RETURNING *;
 DELETE FROM class_enrollments
 WHERE class_id = $1 AND student_id = $2;
 
+-- name: AssignTeacherToSubject :one
+-- Assigns a teacher to a subject in a class for the current tenant school.
+-- The school_id is set automatically by current_school_id() via RLS context.
+-- Returns the full assignment row so the caller can include it in the 201 response.
+-- $1 = class_id   (UUID of the target class)
+-- $2 = subject_id (UUID of the subject to teach)
+-- $3 = teacher_id (UUID of the teacher to assign)
+-- $4 = hours_per_week (smallint, defaults to 1 if the caller does not provide a value)
+-- A unique constraint on (class_id, subject_id, teacher_id) prevents duplicate
+-- assignments; the caller should map pgconn error 23505 to HTTP 409 Conflict.
+INSERT INTO class_subject_teachers (school_id, class_id, subject_id, teacher_id, hours_per_week)
+VALUES (current_school_id(), $1, $2, $3, $4)
+RETURNING *;
+
 -- name: ListTeachersByClass :many
 -- Returns the teacher-subject assignments for a given class.
 -- Used by /classes/{classId}/teachers.

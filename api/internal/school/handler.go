@@ -1163,6 +1163,201 @@ func (h *Handler) EnrollStudent(w http.ResponseWriter, r *http.Request) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// POST /classes/{classId}/teachers
+// ──────────────────────────────────────────────────────────────────────────────
+
+// assignTeacherRequest is the JSON body expected by
+// POST /classes/{classId}/teachers.
+//
+// Only admin users may call this endpoint (enforced via RequireRole middleware
+// in main.go — the handler itself does not re-check the role).
+type assignTeacherRequest struct {
+	// SubjectID is the UUID of the subject the teacher will teach in this class.
+	// Required — the request is rejected with 400 if this is missing or not a
+	// valid UUID.
+	SubjectID string `json:"subject_id"`
+
+	// TeacherID is the UUID of the user with role=teacher to assign.
+	// Required — the request is rejected with 400 if this is missing or not a
+	// valid UUID.
+	TeacherID string `json:"teacher_id"`
+
+	// HoursPerWeek is the number of lessons this teacher teaches per week for
+	// this class+subject pair. Optional — defaults to 1 if not provided.
+	// Must be a positive smallint when provided.
+	HoursPerWeek *int16 `json:"hours_per_week"`
+}
+
+// assignTeacherResponse is the JSON shape returned after a successful
+// teacher-subject assignment. It mirrors the relevant columns of the
+// class_subject_teachers table, omitting school_id (implicit from the
+// JWT/RLS context).
+type assignTeacherResponse struct {
+	ID           uuid.UUID `json:"id"`
+	ClassID      uuid.UUID `json:"class_id"`
+	SubjectID    uuid.UUID `json:"subject_id"`
+	TeacherID    uuid.UUID `json:"teacher_id"`
+	HoursPerWeek int16     `json:"hours_per_week"`
+}
+
+// AssignTeacher handles POST /classes/{classId}/teachers.
+//
+// Assigns a teacher to a subject in a class. The school_id is set automatically
+// by current_school_id() via RLS — the caller does not provide it. The
+// (class_id, subject_id, teacher_id) triple must be unique; a second identical
+// assignment returns 409 Conflict.
+//
+// This endpoint is restricted to the "admin" role. The RequireRole middleware
+// applied in main.go enforces this before the handler runs.
+//
+// Request body (JSON):
+//
+//	{
+//	  "subject_id":    "uuid",   // required
+//	  "teacher_id":   "uuid",   // required
+//	  "hours_per_week": 4       // optional, defaults to 1
+//	}
+//
+// Possible responses:
+//   - 201 Created:              { "data": { assignment fields } }
+//   - 400 Bad Request:         subject_id or teacher_id missing/invalid UUID,
+//                               or teacher/subject FK does not exist
+//   - 401 Unauthorized:        auth context missing
+//   - 409 Conflict:            same (class, subject, teacher) already assigned
+//   - 500 Internal Server Error: database failure
+func (h *Handler) AssignTeacher(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify authentication — ensure the auth middleware ran.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries bound to the RLS context.
+	// All SQL executed through this object is automatically filtered to the
+	// current tenant's school_id via PostgreSQL Row-Level Security.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Parse the class ID from the URL path parameter.
+	// chi.URLParam extracts the {classId} segment registered in main.go.
+	classIDStr := chi.URLParam(r, "classId")
+	classID, err := uuid.Parse(classIDStr)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_ID", "classId must be a valid UUID")
+		return
+	}
+
+	// Step 3: Decode the JSON request body.
+	// We expect subject_id and teacher_id (required), and hours_per_week (optional).
+	var req assignTeacherRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
+		return
+	}
+
+	// Step 4: Validate required fields.
+
+	// subject_id must be present and a well-formed UUID.
+	if strings.TrimSpace(req.SubjectID) == "" {
+		httputil.BadRequest(w, "MISSING_FIELD", "subject_id is required")
+		return
+	}
+	subjectID, err := uuid.Parse(req.SubjectID)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_SUBJECT_ID", "subject_id must be a valid UUID")
+		return
+	}
+
+	// teacher_id must be present and a well-formed UUID.
+	if strings.TrimSpace(req.TeacherID) == "" {
+		httputil.BadRequest(w, "MISSING_FIELD", "teacher_id is required")
+		return
+	}
+	teacherID, err := uuid.Parse(req.TeacherID)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_TEACHER_ID", "teacher_id must be a valid UUID")
+		return
+	}
+
+	// Step 5: Resolve the hours_per_week value.
+	// If the caller omits the field (nil pointer), default to 1.
+	// Romanian schools typically have 1–7 hours per week per subject.
+	hoursPerWeek := int16(1)
+	if req.HoursPerWeek != nil {
+		if *req.HoursPerWeek <= 0 {
+			httputil.BadRequest(w, "INVALID_HOURS", "hours_per_week must be a positive number")
+			return
+		}
+		hoursPerWeek = *req.HoursPerWeek
+	}
+
+	// Step 6: Insert the assignment record into the database.
+	// AssignTeacherToSubject uses current_school_id() in the INSERT, so
+	// school_id is set automatically from the RLS tenant context — we only
+	// pass class, subject, teacher, and hours.
+	assignment, err := queries.AssignTeacherToSubject(r.Context(), generated.AssignTeacherToSubjectParams{
+		ClassID:      classID,
+		SubjectID:    subjectID,
+		TeacherID:    teacherID,
+		HoursPerWeek: hoursPerWeek,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505": // unique_violation
+				// The (class_id, subject_id, teacher_id) triple already exists.
+				// Return 409 Conflict so the caller knows the assignment is a duplicate.
+				httputil.Error(w, http.StatusConflict, "DUPLICATE_ASSIGNMENT",
+					"This teacher is already assigned to the subject in this class")
+				return
+			case "23503": // foreign_key_violation
+				// One of the referenced rows (class, subject, or teacher) does not exist
+				// in the current tenant. Inspect the constraint name to give a specific
+				// error message that helps the caller identify which ID is invalid.
+				switch {
+				case strings.Contains(pgErr.ConstraintName, "teacher_id"):
+					httputil.BadRequest(w, "TEACHER_NOT_FOUND",
+						"The specified teacher does not exist")
+				case strings.Contains(pgErr.ConstraintName, "subject_id"):
+					httputil.BadRequest(w, "SUBJECT_NOT_FOUND",
+						"The specified subject does not exist")
+				default:
+					// Covers class_id FK violation (the class does not exist).
+					httputil.Error(w, http.StatusNotFound, "CLASS_NOT_FOUND",
+						"The specified class does not exist")
+				}
+				return
+			}
+		}
+
+		// Any other database error is unexpected — log and return generic 500.
+		// We never expose raw DB errors to the caller (security / info-leak risk).
+		h.logger.Error("assign_teacher: database insert failed",
+			"error", err,
+			"class_id", classID,
+			"subject_id", subjectID,
+			"teacher_id", teacherID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 7: Return 201 Created with the new assignment in the standard envelope.
+	httputil.Created(w, assignTeacherResponse{
+		ID:           assignment.ID,
+		ClassID:      assignment.ClassID,
+		SubjectID:    assignment.SubjectID,
+		TeacherID:    assignment.TeacherID,
+		HoursPerWeek: assignment.HoursPerWeek,
+	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // DELETE /classes/{classId}/enroll/{studentId}
 // ──────────────────────────────────────────────────────────────────────────────
 

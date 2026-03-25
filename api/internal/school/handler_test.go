@@ -1422,3 +1422,399 @@ func TestEnrollStudent_NonExistentStudent(t *testing.T) {
 		t.Errorf("EnrollStudent (non-existent student): expected error code 'STUDENT_NOT_FOUND', got %q", code)
 	}
 }
+
+// ===========================================================================
+// AssignTeacher tests — POST /classes/{classId}/teachers
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// AssignTeacher test helpers
+// ---------------------------------------------------------------------------
+
+// postAssignTeacherJSON builds an *http.Request for POST /classes/{classId}/teachers
+// with a JSON body and the classId injected into the chi route context so that
+// chi.URLParam(r, "classId") works when the handler is called directly.
+func postAssignTeacherJSON(t *testing.T, classID string, body any) *http.Request {
+	t.Helper()
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("postAssignTeacherJSON: marshal body: %v", err)
+	}
+
+	// The target path does not affect handler dispatch when calling directly, but
+	// it is kept realistic for readability.
+	req := httptest.NewRequest(http.MethodPost, "/classes/"+classID+"/teachers", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	// chi stores URL parameters in the request context using a routeContext key.
+	// We must inject {classId} so that chi.URLParam(r, "classId") works when
+	// the handler is invoked directly (bypassing the chi router dispatch).
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("classId", classID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
+}
+
+// decodeAssignData decodes the { "data": {...} } envelope from an assignment response.
+// Used to assert the fields of a successful 201 response.
+func decodeAssignData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeAssignData: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Data
+}
+
+// decodeAssignError decodes the { "error": { "code": ..., "message": ... } }
+// envelope returned by 4xx responses.
+func decodeAssignError(t *testing.T, rr *httptest.ResponseRecorder) (code, message string) {
+	t.Helper()
+
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeAssignError: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Error.Code, env.Error.Message
+}
+
+// insertAssignmentDirect inserts a class_subject_teachers row directly via the
+// pool (bypassing RLS and the test transaction rollback). This is used to
+// pre-populate an assignment so that a subsequent handler call triggers the
+// duplicate unique constraint (23505).
+//
+// The same pattern is used by insertEnrollmentDirect and insertSubjectDirect.
+func insertAssignmentDirect(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	schoolID, classID, subjectID, teacherID uuid.UUID,
+) {
+	t.Helper()
+
+	ctx := context.Background()
+	id := uuid.NewSHA1(uuid.NameSpaceURL,
+		[]byte(fmt.Sprintf("catalogro-test-assignment-%s-%s-%s-%s",
+			schoolID, classID, subjectID, teacherID)))
+
+	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO class_subject_teachers (id, school_id, class_id, subject_id, teacher_id, hours_per_week)
+		VALUES ($1, $2, $3, $4, $5, 1)
+		ON CONFLICT (id) DO NOTHING`,
+		id, schoolID, classID, subjectID, teacherID,
+	)
+	if err != nil {
+		t.Fatalf("insertAssignmentDirect: insert assignment: %v", err)
+	}
+}
+
+// insertSubjectDirect2 inserts a subject with a fixed id derived from the
+// given seed string. It is distinct from insertSubjectDirect (which uses
+// name+level as the seed) so the two helpers can coexist in the same package.
+func insertSubjectDirect2(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	schoolID uuid.UUID,
+	seedSuffix, name, level string,
+) uuid.UUID {
+	t.Helper()
+
+	ctx := context.Background()
+	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-subject2-"+seedSuffix))
+
+	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO subjects (id, school_id, name, education_level, has_thesis)
+		VALUES ($1, $2, $3, $4::education_level, false)
+		ON CONFLICT (id) DO NOTHING`,
+		id, schoolID, name, level,
+	)
+	if err != nil {
+		t.Fatalf("insertSubjectDirect2: insert subject %q: %v", name, err)
+	}
+	return id
+}
+
+// ---------------------------------------------------------------------------
+// Test 15: AssignTeacher — success (201)
+// ---------------------------------------------------------------------------
+
+// TestAssignTeacher_Success verifies the happy path for
+// POST /classes/{classId}/teachers.
+//
+// Scenario:
+//   - An admin sends a valid JSON body with a real teacher UUID and a real
+//     subject UUID that belong to the same school.
+//   - The handler returns HTTP 201 Created with the assignment record containing:
+//     id (UUID), class_id, subject_id, teacher_id, hours_per_week.
+//   - All returned IDs must match what we sent in the request.
+func TestAssignTeacher_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+	teacherID := users["teacher"]
+
+	// SeedClass creates class "9A", a subject "Matematică", a class enrollment,
+	// and a teacher assignment for the seeded teacher. We will use a DIFFERENT
+	// subject so there is no pre-existing (class, subject, teacher) triple.
+	classID := testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// Insert a second subject so we have a fresh (class, subject) pair to test.
+	// Using insertSubjectDirect2 ensures the row is committed before the handler runs.
+	subjectID := insertSubjectDirect2(t, pool, school1ID, "assign-success", "Fizică", "high")
+
+	// -----------------------------------------------------------------------
+	// 2. Build the request.
+	// -----------------------------------------------------------------------
+	hoursPerWeek := int16(3)
+	body := map[string]any{
+		"subject_id":    subjectID.String(),
+		"teacher_id":    teacherID.String(),
+		"hours_per_week": hoursPerWeek,
+	}
+	req := postAssignTeacherJSON(t, classID.String(), body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject auth + tenant context as an admin user.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.AssignTeacher(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 201 Created.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("AssignTeacher: expected 201, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode and assert response fields.
+	// -----------------------------------------------------------------------
+	data := decodeAssignData(t, rr)
+
+	// id must be a valid UUID.
+	assignID, ok := data["id"].(string)
+	if !ok || assignID == "" {
+		t.Errorf("AssignTeacher: expected non-empty 'id' in response, got: %v", data["id"])
+	}
+	if _, err := uuid.Parse(assignID); err != nil {
+		t.Errorf("AssignTeacher: 'id' is not a valid UUID: %q", assignID)
+	}
+
+	// class_id must match what was used in the URL path.
+	if cid, _ := data["class_id"].(string); cid != classID.String() {
+		t.Errorf("AssignTeacher: expected class_id=%s, got %q", classID, cid)
+	}
+
+	// subject_id must match what we sent.
+	if sid, _ := data["subject_id"].(string); sid != subjectID.String() {
+		t.Errorf("AssignTeacher: expected subject_id=%s, got %q", subjectID, sid)
+	}
+
+	// teacher_id must match what we sent.
+	if tid, _ := data["teacher_id"].(string); tid != teacherID.String() {
+		t.Errorf("AssignTeacher: expected teacher_id=%s, got %q", teacherID, tid)
+	}
+
+	// hours_per_week must reflect the value we sent (3).
+	// JSON numbers decode as float64 when the target is map[string]any.
+	if h, _ := data["hours_per_week"].(float64); h != float64(hoursPerWeek) {
+		t.Errorf("AssignTeacher: expected hours_per_week=%d, got %v", hoursPerWeek, data["hours_per_week"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 16: AssignTeacher — duplicate (class, subject, teacher) → 409 Conflict
+// ---------------------------------------------------------------------------
+
+// TestAssignTeacher_Duplicate verifies that assigning the same teacher to the
+// same subject in the same class twice returns HTTP 409 Conflict with error
+// code DUPLICATE_ASSIGNMENT.
+//
+// Why use insertAssignmentDirect instead of two handler calls?
+// withTenantCtx uses ROLLBACK, so the first handler call's INSERT is rolled back
+// before the second call runs. To test the unique constraint, we need the first
+// assignment to already exist in the DB when the second call runs.
+// insertAssignmentDirect uses a superuser connection that commits immediately.
+func TestAssignTeacher_Duplicate(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+	teacherID := users["teacher"]
+
+	classID := testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// Insert a subject that we will try to assign twice.
+	subjectID := insertSubjectDirect2(t, pool, school1ID, "assign-dup", "Chimie", "high")
+
+	// -----------------------------------------------------------------------
+	// 2. Pre-insert the first assignment (committed, not rolled back).
+	// -----------------------------------------------------------------------
+	insertAssignmentDirect(t, pool, school1ID, classID, subjectID, teacherID)
+
+	// -----------------------------------------------------------------------
+	// 3. Build the request for the same (class, subject, teacher) triple.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"subject_id": subjectID.String(),
+		"teacher_id": teacherID.String(),
+	}
+	req := postAssignTeacherJSON(t, classID.String(), body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.AssignTeacher(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 409 Conflict.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("AssignTeacher (duplicate): expected 409, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// The error code must be DUPLICATE_ASSIGNMENT.
+	errCode, _ := decodeAssignError(t, rr)
+	if errCode != "DUPLICATE_ASSIGNMENT" {
+		t.Errorf("AssignTeacher (duplicate): expected error code 'DUPLICATE_ASSIGNMENT', got %q", errCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 17: AssignTeacher — invalid subject_id → 400 Bad Request
+// ---------------------------------------------------------------------------
+
+// TestAssignTeacher_InvalidSubjectID verifies that sending a non-UUID string
+// for subject_id returns HTTP 400 with error code INVALID_SUBJECT_ID.
+//
+// The handler must validate UUIDs before reaching the database. Sending garbage
+// to the DB would produce a different (less helpful) error.
+func TestAssignTeacher_InvalidSubjectID(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database (we still need a valid auth context).
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+	teacherID := users["teacher"]
+	classID := testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// -----------------------------------------------------------------------
+	// 2. Build a request with a non-UUID subject_id.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"subject_id": "not-a-uuid", // deliberately invalid
+		"teacher_id": teacherID.String(),
+	}
+	req := postAssignTeacherJSON(t, classID.String(), body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler and assert HTTP 400.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.AssignTeacher(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("AssignTeacher (invalid subject_id): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	errCode, _ := decodeAssignError(t, rr)
+	if errCode != "INVALID_SUBJECT_ID" {
+		t.Errorf("AssignTeacher (invalid subject_id): expected error code 'INVALID_SUBJECT_ID', got %q", errCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 18: AssignTeacher — non-existent teacher UUID → 400 Bad Request
+// ---------------------------------------------------------------------------
+
+// TestAssignTeacher_NonExistentTeacher verifies that assigning a teacher whose
+// UUID does not exist in the users table returns HTTP 400 with error code
+// TEACHER_NOT_FOUND (FK violation on teacher_id → 23503).
+//
+// This tests the FK violation (pgconn error 23503) path in the handler.
+func TestAssignTeacher_NonExistentTeacher(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+	teacherID := users["teacher"]
+	classID := testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// Insert a real subject so only the teacher FK will fail.
+	subjectID := insertSubjectDirect2(t, pool, school1ID, "assign-no-teacher", "Biologie", "high")
+
+	// Use a random UUID that definitely does not exist as a user in the school.
+	nonExistentTeacherID := uuid.New()
+
+	// -----------------------------------------------------------------------
+	// 2. Build the request with the non-existent teacher UUID.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"subject_id": subjectID.String(),
+		"teacher_id": nonExistentTeacherID.String(),
+	}
+	req := postAssignTeacherJSON(t, classID.String(), body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler and assert HTTP 400 with TEACHER_NOT_FOUND.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.AssignTeacher(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("AssignTeacher (non-existent teacher): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	errCode, _ := decodeAssignError(t, rr)
+	if errCode != "TEACHER_NOT_FOUND" {
+		t.Errorf("AssignTeacher (non-existent teacher): expected error code 'TEACHER_NOT_FOUND', got %q", errCode)
+	}
+}

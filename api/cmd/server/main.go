@@ -295,7 +295,9 @@ func run() error {
 			r.With(auth.RequireRole("admin", "secretary")).Delete("/classes/{classId}/enroll/{studentId}", schoolHandler.UnenrollStudent)
 			// GET /classes/{classId}/teachers — teacher-subject assignments for a class.
 			r.Get("/classes/{classId}/teachers", schoolHandler.ListTeachers)
-			r.Post("/classes/{classId}/teachers", notImplemented)
+			// POST /classes/{classId}/teachers — assign a teacher to a subject in a class.
+			// Restricted to admin role only (closes #29).
+			r.With(auth.RequireRole("admin")).Post("/classes/{classId}/teachers", schoolHandler.AssignTeacher)
 
 			// Subjects
 			// GET /subjects — list all active subjects for the school.
