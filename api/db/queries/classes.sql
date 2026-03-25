@@ -67,6 +67,32 @@ WHERE teacher_id = $1
     AND class_id = $2
     AND subject_id = $3;
 
+-- name: CreateClass :one
+-- Creates a new class for the current school and the specified school year.
+-- The school_id is set automatically by current_school_id() via RLS context.
+-- $1 = school_year_id (UUID, required)
+-- $2 = name (text, e.g. "5A", required)
+-- $3 = education_level (education_level enum: primary, middle, high)
+-- $4 = grade_number (smallint 1–12, required)
+-- $5 = homeroom_teacher_id (UUID, optional — pass NULL if not yet assigned)
+-- $6 = max_students (smallint, optional — pass NULL to use DB default of 30)
+INSERT INTO classes (school_id, school_year_id, name, education_level, grade_number, homeroom_teacher_id, max_students)
+VALUES (current_school_id(), $1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: UpdateClass :one
+-- Updates mutable fields on a class row.
+-- All fields use the same partial-update pattern: pass the new value to change,
+-- or pass the CURRENT value to preserve it. The Go handler resolves which to send.
+-- $1 = id, $2 = name, $3 = homeroom_teacher_id, $4 = max_students
+UPDATE classes SET
+    name = $2,
+    homeroom_teacher_id = $3,
+    max_students = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CreateSubject :one
 -- Creates a new subject for the current school. The school_id is set
 -- automatically by current_school_id() via RLS context.

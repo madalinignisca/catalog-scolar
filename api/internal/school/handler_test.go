@@ -42,6 +42,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -491,6 +492,480 @@ func TestCreateSubject_DuplicateNameLevel(t *testing.T) {
 	// The handler should detect pgconn error code 23505 and return 409 Conflict.
 	if rr.Code != http.StatusConflict {
 		t.Errorf("CreateSubject (duplicate): expected status 409 Conflict, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// ===========================================================================
+// Class management tests — POST /classes and PUT /classes/{classId}
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Class test helpers
+// ---------------------------------------------------------------------------
+
+// postClassJSON builds an *http.Request for POST /classes with a JSON body.
+func postClassJSON(t *testing.T, body any) *http.Request {
+	t.Helper()
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("postClassJSON: marshal body: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/classes", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// putClassJSON builds an *http.Request for PUT /classes/{classId} with a JSON body.
+// The classId is embedded in the chi route context so the handler can read it
+// via chi.URLParam(r, "classId").
+func putClassJSON(t *testing.T, classID string, body any) *http.Request {
+	t.Helper()
+
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("putClassJSON: marshal body: %v", err)
+	}
+
+	// The path does not matter to chi when calling the handler directly, but
+	// chi.URLParam reads from the route context, so we inject it manually below.
+	req := httptest.NewRequest(http.MethodPut, "/classes/"+classID, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+
+	// chi stores URL parameters in the request context using a routeContext key.
+	// We must inject {classId} so that chi.URLParam(r, "classId") works when
+	// the handler is called directly (bypassing chi's router dispatch).
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("classId", classID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
+}
+
+// decodeClassData decodes the { "data": {...} } envelope from a class response.
+func decodeClassData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeClassData: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Data
+}
+
+// decodeClassError decodes the { "error": { "code": ..., "message": ... } } envelope.
+func decodeClassError(t *testing.T, rr *httptest.ResponseRecorder) (code, message string) {
+	t.Helper()
+
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeClassError: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Error.Code, env.Error.Message
+}
+
+// insertClassDirect inserts a class row directly via the pool (bypassing RLS)
+// so that a subsequent handler call can trigger a duplicate constraint violation.
+// This mirrors insertSubjectDirect but for the classes table.
+func insertClassDirect(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	schoolID, schoolYearID uuid.UUID,
+	name string,
+) {
+	t.Helper()
+
+	ctx := context.Background()
+	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte(
+		fmt.Sprintf("catalogro-test-class-%s-%s-%s", schoolID, schoolYearID, name),
+	))
+
+	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO classes (id, school_id, school_year_id, name, education_level, grade_number)
+		VALUES ($1, $2, $3, $4, 'middle'::education_level, 5)
+		ON CONFLICT (id) DO NOTHING`,
+		id, schoolID, schoolYearID, name,
+	)
+	if err != nil {
+		t.Fatalf("insertClassDirect: insert class %q: %v", name, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 5: CreateClass — success (POST /classes with valid body)
+// ---------------------------------------------------------------------------
+
+// TestCreateClass_Success verifies the happy path for POST /classes.
+//
+// Scenario:
+//   - A school admin sends a valid JSON body with all required fields.
+//   - The handler should return HTTP 201 Created with a JSON body containing:
+//     id (UUID), school_year_id, name, education_level, grade_number,
+//     homeroom_teacher_id (null), max_students.
+func TestCreateClass_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+
+	// Reconstruct the school year ID the same way SeedSchools creates it.
+	// This is deterministic — see testutil.deterministicID.
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+
+	// -----------------------------------------------------------------------
+	// 2. Build the request.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"school_year_id":  schoolYearID.String(),
+		"name":            "5A",
+		"education_level": "middle",
+		"grade_number":    5,
+	}
+	req := postClassJSON(t, body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject auth + tenant context as admin.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.CreateClass(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 201 Created.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("CreateClass: expected 201, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode and assert the response body.
+	// -----------------------------------------------------------------------
+	data := decodeClassData(t, rr)
+
+	// id must be a valid UUID.
+	classID, ok := data["id"].(string)
+	if !ok || classID == "" {
+		t.Errorf("CreateClass: expected non-empty 'id' in response, got: %v", data["id"])
+	}
+	if _, err := uuid.Parse(classID); err != nil {
+		t.Errorf("CreateClass: 'id' is not a valid UUID: %q", classID)
+	}
+
+	// name must match what we sent.
+	if name, _ := data["name"].(string); name != "5A" {
+		t.Errorf("CreateClass: expected name='5A', got %q", name)
+	}
+
+	// education_level must match.
+	if level, _ := data["education_level"].(string); level != "middle" {
+		t.Errorf("CreateClass: expected education_level='middle', got %q", level)
+	}
+
+	// grade_number must match (JSON numbers decode as float64 in map[string]any).
+	if gradeNum, _ := data["grade_number"].(float64); gradeNum != 5 {
+		t.Errorf("CreateClass: expected grade_number=5, got %v", data["grade_number"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 6: CreateClass — missing name → 400 Bad Request
+// ---------------------------------------------------------------------------
+
+// TestCreateClass_MissingName verifies that omitting the required "name" field
+// causes the handler to return HTTP 400 with a MISSING_FIELD error code.
+func TestCreateClass_MissingName(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+
+	// -----------------------------------------------------------------------
+	// 2. Build a request WITHOUT the required "name" field.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"school_year_id":  schoolYearID.String(),
+		"education_level": "middle",
+		"grade_number":    5,
+		// "name" intentionally omitted
+	}
+	req := postClassJSON(t, body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler and assert 400.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.CreateClass(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("CreateClass (missing name): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	code, _ := decodeClassError(t, rr)
+	if code != "MISSING_FIELD" {
+		t.Errorf("CreateClass (missing name): expected error code 'MISSING_FIELD', got %q", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 7: CreateClass — invalid education_level → 400 Bad Request
+// ---------------------------------------------------------------------------
+
+// TestCreateClass_InvalidEducationLevel verifies that an unrecognised
+// education_level value causes the handler to return HTTP 400 with the error
+// code INVALID_EDUCATION_LEVEL.
+func TestCreateClass_InvalidEducationLevel(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+
+	// -----------------------------------------------------------------------
+	// 2. Build a request with an invalid education_level value.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"school_year_id":  schoolYearID.String(),
+		"name":            "5A",
+		"education_level": "lyceum", // not a valid value
+		"grade_number":    5,
+	}
+	req := postClassJSON(t, body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler and assert 400.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.CreateClass(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("CreateClass (invalid level): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	code, _ := decodeClassError(t, rr)
+	if code != "INVALID_EDUCATION_LEVEL" {
+		t.Errorf("CreateClass (invalid level): expected error code 'INVALID_EDUCATION_LEVEL', got %q", code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 8: CreateClass — duplicate name in same school year → 409 Conflict
+// ---------------------------------------------------------------------------
+
+// TestCreateClass_DuplicateName verifies that creating two classes with the
+// same name in the same school year triggers the UNIQUE constraint and results
+// in HTTP 409 Conflict.
+//
+// The classes table has UNIQUE(school_id, school_year_id, name).
+// We pre-insert a class via insertClassDirect (committed, bypassing the test
+// transaction rollback) so the constraint is active when the handler runs.
+func TestCreateClass_DuplicateName(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+
+	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+
+	// -----------------------------------------------------------------------
+	// 2. Pre-insert a class so the UNIQUE constraint fires on the handler call.
+	// -----------------------------------------------------------------------
+	// insertClassDirect commits immediately (unlike withTenantCtx which rolls back),
+	// so the unique constraint on (school_id, school_year_id, name) is active.
+	insertClassDirect(t, pool, school1ID, schoolYearID, "6A")
+
+	// -----------------------------------------------------------------------
+	// 3. Build a request with the same name.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"school_year_id":  schoolYearID.String(),
+		"name":            "6A", // same as pre-inserted row
+		"education_level": "middle",
+		"grade_number":    6,
+	}
+	req := postClassJSON(t, body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler and assert 409 Conflict.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.CreateClass(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Errorf("CreateClass (duplicate): expected 409 Conflict, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: UpdateClass — success (PUT /classes/{classId})
+// ---------------------------------------------------------------------------
+
+// TestUpdateClass_Success verifies the happy path for PUT /classes/{classId}.
+//
+// Scenario:
+//   - An existing class "9A" is created via SeedClass.
+//   - The admin sends a request to rename it to "9B" and set a max_students of 28.
+//   - The handler returns HTTP 200 OK with the updated class in the response body.
+func TestUpdateClass_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database with a seeded class.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+	teacherID := users["teacher"]
+
+	// SeedClass creates class "9A" with the teacher as homeroom teacher and
+	// inserts the related subject and enrollment. Returns the class UUID.
+	classID := testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// -----------------------------------------------------------------------
+	// 2. Build the update request.
+	// -----------------------------------------------------------------------
+	newMaxStudents := int16(28)
+	body := map[string]any{
+		"name":         "9B",        // rename from "9A" to "9B"
+		"max_students": newMaxStudents, // reduce capacity
+	}
+	req := putClassJSON(t, classID.String(), body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject auth + tenant context as admin.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.UpdateClass(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusOK {
+		t.Fatalf("UpdateClass: expected 200, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode and assert the response body.
+	// -----------------------------------------------------------------------
+	data := decodeClassData(t, rr)
+
+	// id must match the class we updated.
+	if id, _ := data["id"].(string); id != classID.String() {
+		t.Errorf("UpdateClass: expected id=%s, got %q", classID, id)
+	}
+
+	// name must reflect the new value.
+	if name, _ := data["name"].(string); name != "9B" {
+		t.Errorf("UpdateClass: expected name='9B', got %q", name)
+	}
+
+	// max_students must reflect the new value.
+	// JSON numbers decode as float64 when the target is map[string]any.
+	if ms, _ := data["max_students"].(float64); ms != float64(newMaxStudents) {
+		t.Errorf("UpdateClass: expected max_students=%d, got %v", newMaxStudents, data["max_students"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: UpdateClass — non-existent class ID → 404 Not Found
+// ---------------------------------------------------------------------------
+
+// TestUpdateClass_NotFound verifies that updating a class that does not exist
+// (or belongs to a different tenant) returns HTTP 404 Not Found.
+//
+// The handler calls GetClassByID first. If that returns pgx.ErrNoRows, the
+// handler must return 404 immediately without attempting a database UPDATE.
+func TestUpdateClass_NotFound(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database (no class inserted for this ID).
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+
+	// Use a random UUID that definitely does not exist in the database.
+	// uuid.New() generates a V4 (random) UUID, which has negligible collision probability.
+	nonExistentID := uuid.New()
+
+	// -----------------------------------------------------------------------
+	// 2. Build the update request with the non-existent ID.
+	// -----------------------------------------------------------------------
+	body := map[string]any{
+		"name": "Phantom Class",
+	}
+	req := putClassJSON(t, nonExistentID.String(), body)
+
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler and assert 404.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.UpdateClass(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("UpdateClass (not found): expected 404, got %d — body: %s",
 			rr.Code, rr.Body.String())
 	}
 }
