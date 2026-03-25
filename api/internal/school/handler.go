@@ -816,32 +816,37 @@ func (h *Handler) UpdateClass(w http.ResponseWriter, r *http.Request) {
 		newName = *req.Name
 	}
 
-	// homeroom_teacher_id: use the requested value (even if null — null clears it).
-	// If the caller omits the field the JSON decoder sets req.HomeroomTeacherID = nil,
-	// which means "clear the teacher". This matches the spec: the caller must send
-	// the existing teacher ID explicitly to keep it.
-	var newTeacherID pgtype.UUID
+	// homeroom_teacher_id: consistent with name and max_students — omitting the
+	// field preserves the current value. To CLEAR the teacher, send explicit null.
+	// This is the behavior Gemini Code Assist recommended for predictable partial updates.
+	newTeacherID := current.HomeroomTeacherID // preserve current by default
 	if req.HomeroomTeacherID != nil {
-		parsed, err := uuid.Parse(*req.HomeroomTeacherID)
-		if err != nil {
-			httputil.BadRequest(w, "INVALID_TEACHER_ID",
-				"homeroom_teacher_id must be a valid UUID")
-			return
+		if *req.HomeroomTeacherID == "" {
+			// Explicit empty string means "clear the teacher assignment"
+			newTeacherID = pgtype.UUID{Valid: false}
+		} else {
+			parsed, err := uuid.Parse(*req.HomeroomTeacherID)
+			if err != nil {
+				httputil.BadRequest(w, "INVALID_TEACHER_ID",
+					"homeroom_teacher_id must be a valid UUID or empty string to clear")
+				return
+			}
+			newTeacherID = pgtype.UUID{Bytes: parsed, Valid: true}
 		}
-		newTeacherID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
-	// If req.HomeroomTeacherID is nil, newTeacherID remains its zero value
-	// (pgtype.UUID{Valid: false}), which the SQL writes as NULL.
 
-	// max_students: COALESCE in SQL handles this — passing nil keeps current value.
-	// The UpdateClassParams already accepts *int16, so we pass req.MaxStudents directly.
+	// max_students: preserve current if omitted, update if provided.
+	newMaxStudents := current.MaxStudents
+	if req.MaxStudents != nil {
+		newMaxStudents = req.MaxStudents
+	}
 
-	// Step 6: Execute the update.
+	// Step 6: Execute the update. All fields are resolved — SQL does direct assignment.
 	cls, err := queries.UpdateClass(r.Context(), generated.UpdateClassParams{
 		ID:                classID,
 		Name:              newName,
 		HomeroomTeacherID: newTeacherID,
-		MaxStudents:       req.MaxStudents,
+		MaxStudents:       newMaxStudents,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

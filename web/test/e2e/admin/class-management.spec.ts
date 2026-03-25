@@ -172,9 +172,9 @@ interface ListClassesResponse {
  * to get the active school_year_id for use when creating a class.
  *
  * Since GET /schools/current/year is not yet implemented (returns 501), we
- * create a class and read its school_year_id back from the response, then
- * use that ID for subsequent calls. This is a pragmatic bootstrapping approach
- * for tests while the school year endpoint is pending.
+ * list existing classes via GET /classes and read the school_year_id from the
+ * first result. This works because seed data always creates classes with a
+ * valid school_year_id.
  *
  * ALTERNATIVE: seed.sql must contain a known school_year_id that we can
  * hard-code here. We use the dynamic approach to avoid coupling to a seed UUID.
@@ -454,8 +454,9 @@ test.describe('class management', () => {
     /**
      * Step 2: Rename the class.
      * We send a PUT with only the "name" field — max_students and
-     * homeroom_teacher_id are omitted (will be set to null by the handler,
-     * since the JSON null/absent decodes to nil and clears the optional fields).
+     * homeroom_teacher_id are omitted, which preserves their current values.
+     * The handler uses a consistent partial-update pattern: omitted fields
+     * keep their existing value, only explicitly provided fields are changed.
      */
     const newName = uniqueClassName('8D');
 

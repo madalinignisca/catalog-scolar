@@ -81,17 +81,14 @@ VALUES (current_school_id(), $1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: UpdateClass :one
--- Updates mutable fields on a class row. COALESCE keeps the existing value
--- when the caller passes NULL for a field they do not want to change.
--- homeroom_teacher_id is NOT wrapped in COALESCE — passing NULL clears the assignment.
--- $1 = id (UUID of the class to update)
--- $2 = name (text, nullable — NULL means keep current value)
--- $3 = homeroom_teacher_id (UUID, nullable — NULL clears the teacher assignment)
--- $4 = max_students (smallint, nullable — NULL means keep current value)
+-- Updates mutable fields on a class row.
+-- All fields use the same partial-update pattern: pass the new value to change,
+-- or pass the CURRENT value to preserve it. The Go handler resolves which to send.
+-- $1 = id, $2 = name, $3 = homeroom_teacher_id, $4 = max_students
 UPDATE classes SET
-    name = COALESCE($2, name),
+    name = $2,
     homeroom_teacher_id = $3,
-    max_students = COALESCE($4, max_students),
+    max_students = $4,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
