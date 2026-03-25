@@ -44,6 +44,28 @@ WHERE ce.class_id = $1
     AND ce.withdrawn_at IS NULL
 ORDER BY u.last_name, u.first_name;
 
+-- name: EnrollStudent :one
+-- Enrols a student in a class for the current tenant school.
+-- The school_id is set automatically by current_school_id() via RLS context.
+-- Returns the full enrollment row so the caller can include it in the 201 response.
+-- $1 = class_id (UUID of the target class)
+-- $2 = student_id (UUID of the student to enrol)
+-- A unique constraint on (class_id, student_id) prevents duplicate enrollments;
+-- the caller should map the 23505 pgconn error to HTTP 409 Conflict.
+INSERT INTO class_enrollments (school_id, class_id, student_id)
+VALUES (current_school_id(), $1, $2)
+RETURNING *;
+
+-- name: UnenrollStudent :exec
+-- Removes a student's enrollment from a class (hard delete — enrollment record is removed).
+-- Only affects the exact (class_id, student_id) pair; no other data is changed.
+-- The handler should return 204 No Content regardless of whether a row was found,
+-- because a DELETE of a non-existent record is idempotent from the caller's perspective.
+-- $1 = class_id (UUID of the class)
+-- $2 = student_id (UUID of the student to remove)
+DELETE FROM class_enrollments
+WHERE class_id = $1 AND student_id = $2;
+
 -- name: ListTeachersByClass :many
 -- Returns the teacher-subject assignments for a given class.
 -- Used by /classes/{classId}/teachers.
