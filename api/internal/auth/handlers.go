@@ -14,6 +14,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -258,8 +259,13 @@ func HandleRefresh(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 		// or from the httpOnly cookie (browser clients using cookie auth).
 		var req refreshRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			// Body may be empty for cookie-based requests — that's OK,
-			// we'll fall back to reading the cookie below.
+			// Empty body (io.EOF) is expected for cookie-based requests — the
+			// refresh token comes from the cookie, not the JSON body.
+			// Any other decode error means malformed JSON — reject it.
+			if !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON body")
+				return
+			}
 			req = refreshRequest{}
 		}
 
@@ -796,9 +802,10 @@ func newAuthCookie(name, value, path string, maxAge int, r *http.Request) *http.
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   maxAge,
 	}
-	// In local development (no TLS), allow the cookie over plain HTTP.
-	// In production, r.TLS is non-nil so Secure stays true.
-	if r.TLS == nil {
+	// In production behind a TLS-terminating proxy (Traefik/nginx), r.TLS is nil
+	// because the Go server receives plain HTTP. Check X-Forwarded-Proto to detect
+	// the original protocol. Only disable Secure for actual non-TLS development.
+	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") != "https" {
 		cookie.Secure = false
 	}
 	return cookie

@@ -109,9 +109,10 @@ func getTokenFromRequest(r *http.Request) string {
 	}
 
 	// Fall back to the Authorization header for non-browser API clients.
+	// RFC 7235: auth scheme names are case-insensitive ("bearer", "Bearer", "BEARER").
 	authHeader := r.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		return strings.TrimPrefix(authHeader, "Bearer ")
+	if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+		return strings.TrimSpace(authHeader[7:])
 	}
 
 	return ""
