@@ -1121,14 +1121,26 @@ func (h *Handler) EnrollStudent(w http.ResponseWriter, r *http.Request) {
 		StudentID: studentID,
 	})
 	if err != nil {
-		// A 23505 error code means the (class_id, student_id) unique constraint
-		// was violated — the student is already enrolled in this class.
-		// We return 409 Conflict so the caller can surface a meaningful message.
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			httputil.Error(w, http.StatusConflict, "DUPLICATE_ENROLLMENT",
-				"Student is already enrolled in this class")
-			return
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505": // unique_violation
+				// The (class_id, student_id) pair already exists.
+				httputil.Error(w, http.StatusConflict, "DUPLICATE_ENROLLMENT",
+					"Student is already enrolled in this class")
+				return
+			case "23503": // foreign_key_violation
+				// The class_id or student_id references a non-existent row.
+				// Inspect the constraint name to give a specific error.
+				if strings.Contains(pgErr.ConstraintName, "student_id") {
+					httputil.BadRequest(w, "STUDENT_NOT_FOUND",
+						"The specified student does not exist")
+				} else {
+					httputil.Error(w, http.StatusNotFound, "CLASS_NOT_FOUND",
+						"The specified class does not exist")
+				}
+				return
+			}
 		}
 
 		// Any other database error is unexpected — log and return generic 500.

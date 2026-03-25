@@ -1384,3 +1384,41 @@ func TestUnenrollStudent_Success(t *testing.T) {
 		t.Errorf("UnenrollStudent: expected empty body for 204, got %q", rr.Body.String())
 	}
 }
+
+// TestEnrollStudent_NonExistentStudent verifies that enrolling a non-existent
+// student (valid UUID format, but no matching user row in the database) returns
+// 400 Bad Request with a STUDENT_NOT_FOUND error code instead of a generic 500.
+// This tests the 23503 (foreign_key_violation) handling in the handler.
+func TestEnrollStudent_NonExistentStudent(t *testing.T) {
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	secretaryID := users["secretary"]
+	classID := testutil.SeedClass(t, pool, school1ID, users["teacher"])
+
+	// Use a random UUID that does not exist in the users table.
+	nonExistentStudentID := uuid.New()
+
+	body := map[string]any{
+		"student_id": nonExistentStudentID.String(),
+	}
+	req := postEnrollJSON(t, classID.String(), body)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, secretaryID, "secretary")
+	defer rollback()
+
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.EnrollStudent(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("EnrollStudent (non-existent student): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	code, _ := decodeEnrollError(t, rr)
+	if code != "STUDENT_NOT_FOUND" {
+		t.Errorf("EnrollStudent (non-existent student): expected error code 'STUDENT_NOT_FOUND', got %q", code)
+	}
+}
