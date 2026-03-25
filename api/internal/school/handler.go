@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
 	"github.com/vlahsh/catalogro/api/internal/auth"
@@ -651,8 +652,9 @@ func (h *Handler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 		//
 		// pgconn.PgError is the pgx type that wraps PostgreSQL error codes.
 		// We use errors.As (not a type switch) because pgx may wrap the error.
-		var pgErr interface{ SQLState() string }
-		if errors.As(err, &pgErr) && pgErr.SQLState() == "23505" {
+		// The Code field (not SQLState method) holds the 5-char SQLSTATE string.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			httputil.Error(w, http.StatusConflict, "DUPLICATE_SUBJECT",
 				"A subject with this name already exists for the selected education level")
 			return

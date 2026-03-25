@@ -488,17 +488,9 @@ func TestCreateSubject_DuplicateNameLevel(t *testing.T) {
 	// A 201 here would mean the unique constraint is not being enforced —
 	// the school would end up with two subjects named "Fizică" at "high" level,
 	// which would cause confusion in grade entry and reporting.
-	if rr.Code == http.StatusCreated {
-		t.Errorf("CreateSubject (duplicate): expected a non-201 response for duplicate subject, got 201 Created")
+	// The handler should detect pgconn error code 23505 and return 409 Conflict.
+	if rr.Code != http.StatusConflict {
+		t.Errorf("CreateSubject (duplicate): expected status 409 Conflict, got %d — body: %s",
+			rr.Code, rr.Body.String())
 	}
-
-	// The response must be a 4xx or 5xx error status.
-	// 409 Conflict is preferred (the handler detects the pgconn error code 23505).
-	// 500 is also acceptable if the DB error bubbles up as a generic error.
-	if rr.Code < http.StatusBadRequest {
-		t.Errorf("CreateSubject (duplicate): expected 4xx/5xx for duplicate subject, got %d", rr.Code)
-	}
-
-	t.Logf("CreateSubject (duplicate): correctly rejected duplicate subject with status %d — body: %s",
-		rr.Code, rr.Body.String())
 }
