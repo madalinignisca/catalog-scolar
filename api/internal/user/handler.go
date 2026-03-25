@@ -33,6 +33,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
@@ -664,7 +665,7 @@ func (h *Handler) ListChildren(w http.ResponseWriter, r *http.Request) {
 		// LEFT JOIN means this will be a zero UUID with Valid=false when not enrolled.
 		// pgtype.UUID.Bytes is [16]byte — we format it as the standard 8-4-4-4-12 UUID string.
 		if row.ClassID.Valid {
-			resp.ClassID = formatUUIDBytes(row.ClassID.Bytes)
+			resp.ClassID = uuid.UUID(row.ClassID.Bytes).String()
 		}
 
 		// ClassName is a nullable *string — only include if the child is enrolled.
@@ -685,22 +686,6 @@ func (h *Handler) ListChildren(w http.ResponseWriter, r *http.Request) {
 	httputil.Success(w, result)
 }
 
-// formatUUIDBytes converts a [16]byte UUID to the standard 8-4-4-4-12 string format.
-// pgtype.UUID stores the UUID as raw bytes; this helper converts them to the
-// human-readable hyphenated string that the API clients expect.
-//
-// Example output: "f1000000-0000-0000-0000-000000000001"
-func formatUUIDBytes(b [16]byte) string {
-	// The standard UUID format is: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-	// We use fmt.Sprintf with %x for each segment, zero-padded to the correct width.
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4],   // 8 hex chars  (4 bytes)
-		b[4:6],   // 4 hex chars  (2 bytes)
-		b[6:8],   // 4 hex chars  (2 bytes)
-		b[8:10],  // 4 hex chars  (2 bytes)
-		b[10:16], // 12 hex chars (6 bytes)
-	)
-}
 
 // generateActivationToken creates a cryptographically random 64-character hex
 // string suitable for use as an activation token. It is not used directly by
