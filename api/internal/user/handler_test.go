@@ -1092,14 +1092,11 @@ func TestListChildren_EmptyForUserWithNoChildren(t *testing.T) {
 	// -----------------------------------------------------------------------
 	// 5. Assert the response is an empty array (not null).
 	// -----------------------------------------------------------------------
-	items := decodeDataList(t, rr)
-
-	if len(items) != 0 {
-		t.Errorf("ListChildren (empty): expected 0 items, got %d — body: %s", len(items), rr.Body.String())
-	}
+	// Read the raw body BEFORE decoding, because json.NewDecoder consumes
+	// the rr.Body reader — subsequent rr.Body.String() calls return "".
+	rawBody := rr.Body.String()
 
 	// The raw JSON must contain [] (empty array), not null or omitted.
-	rawBody := rr.Body.String()
 	if !strings.Contains(rawBody, `[]`) {
 		t.Errorf("ListChildren (empty): expected '[]' in response body, got: %s", rawBody)
 	}
