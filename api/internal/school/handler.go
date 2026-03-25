@@ -1023,6 +1023,219 @@ func (h *Handler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// POST /classes/{classId}/enroll
+// ──────────────────────────────────────────────────────────────────────────────
+
+// enrollRequest is the JSON body expected by POST /classes/{classId}/enroll.
+// Only admin and secretary users may call this endpoint (enforced via
+// RequireRole middleware in main.go — the handler itself does not re-check).
+type enrollRequest struct {
+	// StudentID is the UUID of the student to enrol in the class.
+	// Required — the request is rejected with 400 if this is missing or not
+	// a valid UUID. The student must already exist as a user in the school.
+	StudentID string `json:"student_id"`
+}
+
+// enrollmentResponse is the JSON shape returned after a successful enrollment.
+// It mirrors the relevant columns of the class_enrollments table, omitting
+// school_id (implicit from the JWT/RLS context).
+type enrollmentResponse struct {
+	ID        uuid.UUID `json:"id"`
+	ClassID   uuid.UUID `json:"class_id"`
+	StudentID uuid.UUID `json:"student_id"`
+}
+
+// EnrollStudent handles POST /classes/{classId}/enroll.
+//
+// Enrols a student in a class. The school_id is set automatically by
+// current_school_id() via RLS — the caller does not provide it. The
+// (class_id, student_id) pair must be unique; a second enrolment of the
+// same student returns 409 Conflict.
+//
+// This endpoint is restricted to "admin" and "secretary" roles. The
+// RequireRole middleware applied in main.go enforces this before the handler.
+//
+// Request body (JSON):
+//
+//	{ "student_id": "uuid" }
+//
+// Possible responses:
+//   - 201 Created:              { "data": { enrollment fields } }
+//   - 400 Bad Request:         student_id missing or not a valid UUID
+//   - 401 Unauthorized:        auth context missing
+//   - 409 Conflict:            student already enrolled in this class
+//   - 500 Internal Server Error: database failure
+func (h *Handler) EnrollStudent(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify authentication — ensure the auth middleware ran.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries bound to the RLS context.
+	// All SQL executed through this object is automatically filtered to the
+	// current tenant's school_id via PostgreSQL Row-Level Security.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Parse the class ID from the URL path parameter.
+	// chi.URLParam extracts the {classId} segment registered in main.go.
+	classIDStr := chi.URLParam(r, "classId")
+	classID, err := uuid.Parse(classIDStr)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_ID", "classId must be a valid UUID")
+		return
+	}
+
+	// Step 3: Decode the JSON request body.
+	// We expect exactly one field: student_id (a UUID string).
+	var req enrollRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
+		return
+	}
+
+	// Step 4: Validate the student_id field.
+	// The field is required and must be a well-formed UUID. An empty or
+	// missing student_id would produce pgx.ErrNoRows or a FK violation —
+	// both worse errors than the early validation we do here.
+	if strings.TrimSpace(req.StudentID) == "" {
+		httputil.BadRequest(w, "MISSING_FIELD", "student_id is required")
+		return
+	}
+	studentID, err := uuid.Parse(req.StudentID)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_STUDENT_ID", "student_id must be a valid UUID")
+		return
+	}
+
+	// Step 5: Insert the enrollment record into the database.
+	// EnrollStudent uses current_school_id() in the INSERT, so school_id is
+	// set automatically from the RLS tenant context — we only pass class and student.
+	enrollment, err := queries.EnrollStudent(r.Context(), generated.EnrollStudentParams{
+		ClassID:   classID,
+		StudentID: studentID,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "23505": // unique_violation
+				// The (class_id, student_id) pair already exists.
+				httputil.Error(w, http.StatusConflict, "DUPLICATE_ENROLLMENT",
+					"Student is already enrolled in this class")
+				return
+			case "23503": // foreign_key_violation
+				// The class_id or student_id references a non-existent row.
+				// Inspect the constraint name to give a specific error.
+				if strings.Contains(pgErr.ConstraintName, "student_id") {
+					httputil.BadRequest(w, "STUDENT_NOT_FOUND",
+						"The specified student does not exist")
+				} else {
+					httputil.Error(w, http.StatusNotFound, "CLASS_NOT_FOUND",
+						"The specified class does not exist")
+				}
+				return
+			}
+		}
+
+		// Any other database error is unexpected — log and return generic 500.
+		// We never expose raw DB errors to the caller (security / info-leak risk).
+		h.logger.Error("enroll_student: database insert failed",
+			"error", err,
+			"class_id", classID,
+			"student_id", studentID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 6: Return 201 Created with the new enrollment data in the standard envelope.
+	httputil.Created(w, enrollmentResponse{
+		ID:        enrollment.ID,
+		ClassID:   enrollment.ClassID,
+		StudentID: enrollment.StudentID,
+	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DELETE /classes/{classId}/enroll/{studentId}
+// ──────────────────────────────────────────────────────────────────────────────
+
+// UnenrollStudent handles DELETE /classes/{classId}/enroll/{studentId}.
+//
+// Removes a student from a class by deleting the class_enrollments row that
+// links them. The operation is idempotent: if the student is not enrolled, the
+// handler still returns 204 (no error) because the desired state (not enrolled)
+// is already satisfied.
+//
+// This endpoint is restricted to "admin" and "secretary" roles. The
+// RequireRole middleware applied in main.go enforces this before the handler.
+//
+// Possible responses:
+//   - 204 No Content:          enrollment removed (or student was not enrolled)
+//   - 400 Bad Request:         classId or studentId is not a valid UUID
+//   - 401 Unauthorized:        auth context missing
+//   - 500 Internal Server Error: database failure
+func (h *Handler) UnenrollStudent(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify authentication — ensure the auth middleware ran.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries bound to the RLS context.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Parse the class ID from the URL path.
+	classIDStr := chi.URLParam(r, "classId")
+	classID, err := uuid.Parse(classIDStr)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_ID", "classId must be a valid UUID")
+		return
+	}
+
+	// Step 3: Parse the student ID from the URL path.
+	// chi captures {studentId} from the registered DELETE route.
+	studentIDStr := chi.URLParam(r, "studentId")
+	studentID, err := uuid.Parse(studentIDStr)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_STUDENT_ID", "studentId must be a valid UUID")
+		return
+	}
+
+	// Step 4: Delete the enrollment record.
+	// UnenrollStudent is an :exec query — it returns only an error, not a row.
+	// We do NOT check how many rows were affected: if the enrollment did not
+	// exist, the DELETE is a no-op and we still return 204. This idempotent
+	// behavior is standard for DELETE endpoints (RFC 9110 §9.3.5).
+	if err := queries.UnenrollStudent(r.Context(), generated.UnenrollStudentParams{
+		ClassID:   classID,
+		StudentID: studentID,
+	}); err != nil {
+		h.logger.Error("unenroll_student: database delete failed",
+			"error", err,
+			"class_id", classID,
+			"student_id", studentID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 5: Return 204 No Content — no response body for DELETE.
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 

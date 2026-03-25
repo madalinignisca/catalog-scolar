@@ -289,8 +289,10 @@ func run() error {
 			r.Get("/classes/{classId}", schoolHandler.GetClass)
 			// PUT /classes/{classId} — update a class. Restricted to admin role only.
 			r.With(auth.RequireRole("admin")).Put("/classes/{classId}", schoolHandler.UpdateClass)
-			r.Post("/classes/{classId}/enroll", notImplemented)
-			r.Delete("/classes/{classId}/enroll/{studentId}", notImplemented)
+			// POST /classes/{classId}/enroll — enrol a student. Admin + secretary only.
+			r.With(auth.RequireRole("admin", "secretary")).Post("/classes/{classId}/enroll", schoolHandler.EnrollStudent)
+			// DELETE /classes/{classId}/enroll/{studentId} — remove a student. Admin + secretary only.
+			r.With(auth.RequireRole("admin", "secretary")).Delete("/classes/{classId}/enroll/{studentId}", schoolHandler.UnenrollStudent)
 			// GET /classes/{classId}/teachers — teacher-subject assignments for a class.
 			r.Get("/classes/{classId}/teachers", schoolHandler.ListTeachers)
 			r.Post("/classes/{classId}/teachers", notImplemented)
