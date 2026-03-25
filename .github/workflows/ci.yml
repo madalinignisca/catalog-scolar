@@ -144,9 +144,6 @@ jobs:
         run: npm run build
 
   e2e-test:
-    # E2E tests are informational until all SSR auth race conditions are resolved.
-    # Once cookie-based auth is fully stable in CI, remove continue-on-error.
-    continue-on-error: true
     # ── E2E Test ─────────────────────────────────────────────────────────────
     # Runs Playwright end-to-end tests against a full live stack:
     # PostgreSQL + Redis services, the Go API server, and the Nuxt dev server.

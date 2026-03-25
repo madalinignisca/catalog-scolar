@@ -150,67 +150,128 @@ const API_BASE = 'http://localhost:8080/api/v1';
  * @param page - Playwright Page instance.
  * @param user - User credentials from TEST_USERS.
  */
+/**
+ * parseCookiesFromResponse
+ *
+ * Extracts Set-Cookie headers from a Node.js fetch Response and converts
+ * them to Playwright's cookie format for injection via context.addCookies().
+ */
+function parseCookiesFromResponse(
+  response: Response,
+  domain: string,
+): Array<{
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'Lax' | 'Strict' | 'None';
+}> {
+  const cookies: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'Lax' | 'Strict' | 'None';
+  }> = [];
+
+  // getSetCookie() returns individual Set-Cookie header values (Node 20+)
+  const setCookieHeaders = response.headers.getSetCookie();
+
+  for (const header of setCookieHeaders) {
+    const parts = header.split(';').map((p) => p.trim());
+    const [nameValue] = parts;
+    if (nameValue === undefined) continue;
+
+    const eqIndex = nameValue.indexOf('=');
+    if (eqIndex === -1) continue;
+
+    const name = nameValue.substring(0, eqIndex);
+    const value = nameValue.substring(eqIndex + 1);
+
+    let path = '/';
+    let httpOnly = false;
+    let secure = false;
+    let sameSite: 'Lax' | 'Strict' | 'None' = 'Lax';
+
+    for (const part of parts.slice(1)) {
+      const lower = part.toLowerCase();
+      if (lower.startsWith('path=')) path = part.substring(5);
+      if (lower === 'httponly') httpOnly = true;
+      if (lower === 'secure') secure = false; // Force false for localhost
+      if (lower.startsWith('samesite=')) {
+        const val = part.substring(9);
+        if (val === 'Strict') sameSite = 'Strict';
+        else if (val === 'None') sameSite = 'None';
+        else sameSite = 'Lax';
+      }
+    }
+
+    cookies.push({ name, value, domain, path, httpOnly, secure, sameSite });
+  }
+
+  return cookies;
+}
+
 async function performLogin(
   page: Page,
   user: (typeof TEST_USERS)[keyof typeof TEST_USERS],
 ): Promise<void> {
-  // Step 1: Navigate to the app so the browser has the correct origin.
-  // We need to be on localhost:3000 before making cross-origin requests
-  // to localhost:8080, so the browser can store the response cookies.
-  await page.goto('/login');
+  // Step 1: Call the login API from Node.js (not browser).
+  // This avoids cross-origin cookie issues between localhost:3000 and :8080.
+  const loginResponse = await fetch(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: user.email, password: user.password }),
+  });
 
-  // Step 2: Call the login API from within the browser context.
-  // This ensures httpOnly cookies from the response are stored in the
-  // browser's cookie jar (not accessible from Node.js, only from the browser).
-  const loginResult = await page.evaluate(
-    async ({ apiBase, email, password }) => {
-      const res = await fetch(`${apiBase}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-        credentials: 'include',
-      });
-      if (!res.ok) return { ok: false as const, status: res.status };
-      const json = (await res.json()) as {
-        data: {
-          mfa_required?: boolean;
-          mfa_token?: string;
-        };
-      };
-      return { ok: true as const, data: json.data };
-    },
-    { apiBase: API_BASE, email: user.email, password: user.password },
-  );
-
-  if (!loginResult.ok) {
-    throw new Error(`Login API failed for ${user.email}: ${String(loginResult.status)}`);
+  if (!loginResponse.ok) {
+    throw new Error(`Login API failed for ${user.email}: ${String(loginResponse.status)}`);
   }
 
-  // Step 3: If MFA is required, generate TOTP code and call 2FA endpoint.
-  if (loginResult.data.mfa_required === true && loginResult.data.mfa_token !== undefined) {
+  const loginData = (await loginResponse.json()) as {
+    data: {
+      mfa_required?: boolean;
+      mfa_token?: string;
+    };
+  };
+
+  // Collect cookies from the login response (non-MFA users get tokens here).
+  let cookies = parseCookiesFromResponse(loginResponse, 'localhost');
+
+  // Step 2: If MFA is required, generate TOTP code and call 2FA endpoint.
+  if (loginData.data.mfa_required === true && loginData.data.mfa_token !== undefined) {
     const code = await generateTOTP(TEST_TOTP_SECRET);
 
-    const mfaResult = await page.evaluate(
-      async ({ apiBase, mfaToken, totpCode }) => {
-        const res = await fetch(`${apiBase}/auth/2fa/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mfa_token: mfaToken, totp_code: totpCode }),
-          credentials: 'include',
-        });
-        return { ok: res.ok, status: res.status };
-      },
-      { apiBase: API_BASE, mfaToken: loginResult.data.mfa_token, totpCode: code },
-    );
+    const mfaResponse = await fetch(`${API_BASE}/auth/2fa/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mfa_token: loginData.data.mfa_token,
+        totp_code: code,
+      }),
+    });
 
-    if (!mfaResult.ok) {
-      throw new Error(`MFA API failed for ${user.email}: ${String(mfaResult.status)}`);
+    if (!mfaResponse.ok) {
+      throw new Error(`MFA API failed for ${user.email}: ${String(mfaResponse.status)}`);
     }
+
+    // MFA response sets the real auth cookies.
+    cookies = parseCookiesFromResponse(mfaResponse, 'localhost');
   }
 
-  // Step 4: Navigate to the dashboard. The browser now has httpOnly auth
-  // cookies, so the Nuxt SSR request will include them automatically.
-  // No localStorage injection needed — cookies are sent with every request.
+  // Step 3: Inject the cookies into the browser context.
+  // Playwright's addCookies works regardless of the current page URL and
+  // persists for the lifetime of the browser context (all page navigations).
+  if (cookies.length > 0) {
+    await page.context().addCookies(cookies);
+  }
+
+  // Step 4: Navigate to the dashboard. The browser now has auth cookies,
+  // so the Nuxt SSR request will include them automatically.
   await page.goto('/');
   await page
     .waitForURL((url) => url.pathname === '/', { timeout: 15_000 })
