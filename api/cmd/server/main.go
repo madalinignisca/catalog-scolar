@@ -34,6 +34,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
 	"github.com/vlahsh/catalogro/api/internal/school"
+	"github.com/vlahsh/catalogro/api/internal/user"
 )
 
 func main() {
@@ -104,6 +105,11 @@ func run() error {
 
 	// catalogHandler manages grades (note) and absences (absente) — the core catalog.
 	catalogHandler := catalog.NewHandler(queries, logger)
+
+	// userHandler manages user provisioning: creating accounts, listing users,
+	// and listing accounts awaiting activation. Restricted to admin and secretary
+	// roles (enforced per-route via RequireRole middleware below).
+	userHandler := user.NewHandler(queries, logger, cfg.BaseURL)
 
 	// =========================================================================
 	// Router setup
@@ -243,11 +249,23 @@ func run() error {
 			// Users (provisioning and profile)
 			r.Get("/users/me", auth.HandleGetProfile(queries))
 			r.Put("/users/me", notImplemented)
-			r.Get("/users", notImplemented)
-			r.Post("/users", notImplemented)
+
+			// POST /users — provision a new user (admin/secretary only).
+			// RequireRole wraps only this route so teachers/parents get 403, not 501.
+			r.With(auth.RequireRole("admin", "secretary")).Post("/users", userHandler.ProvisionUser)
+
 			r.Post("/users/import", notImplemented)
 			r.Post("/users/{userId}/resend-activation", notImplemented)
-			r.Get("/users/pending", notImplemented)
+
+			// GET /users/pending — list accounts awaiting activation (admin/secretary only).
+			// NOTE: this route must be registered BEFORE /users/{userId} (if that is ever
+			// added) so that chi matches the literal segment "pending" first, not as a
+			// userId path parameter.
+			r.With(auth.RequireRole("admin", "secretary")).Get("/users/pending", userHandler.ListPendingActivations)
+
+			// GET /users — list all active users in the school (admin/secretary only).
+			r.With(auth.RequireRole("admin", "secretary")).Get("/users", userHandler.ListUsers)
+
 			r.Get("/users/me/children", notImplemented)
 
 			// GDPR
