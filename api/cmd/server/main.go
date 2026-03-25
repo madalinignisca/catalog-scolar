@@ -276,10 +276,15 @@ func run() error {
 			// parent accounts for class communication purposes.
 			r.Get("/users/me/children", userHandler.ListChildren)
 
-			// GDPR
-			r.Post("/users/me/gdpr/consent", notImplemented)
-			r.Post("/users/me/gdpr/export", notImplemented)
-			r.Post("/users/me/gdpr/delete", notImplemented)
+			// GDPR — all authenticated users can manage their own data.
+			// These endpoints are self-service: no role restriction is needed because
+			// the user ID always comes from the JWT, never from a URL parameter.
+			// RecordConsent: stamps gdpr_consent_at for the current user.
+			// ExportData: returns the user's profile + children (Art. 20 portability).
+			// RequestDeletion: anonymises PII and deactivates the account (Art. 17).
+			r.Post("/users/me/gdpr/consent", userHandler.RecordConsent)
+			r.Post("/users/me/gdpr/export", userHandler.ExportData)
+			r.Post("/users/me/gdpr/delete", userHandler.RequestDeletion)
 
 			// School config
 			// GET /schools/current — returns the current tenant's school details.

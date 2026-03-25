@@ -79,3 +79,27 @@ RETURNING *;
 -- name: LinkParentStudent :exec
 INSERT INTO parent_student_links (school_id, parent_id, student_id, relationship, is_primary)
 VALUES (current_school_id(), $1, $2, $3, $4);
+
+-- name: SoftDeleteUser :exec
+-- Soft-deletes a user by setting is_active=false and clearing PII.
+-- We anonymize email, phone, first_name, last_name but keep the row
+-- for audit/legal purposes (Romanian education law requires keeping student records).
+UPDATE users SET
+    is_active = false,
+    email = NULL,
+    phone = NULL,
+    first_name = 'DELETED',
+    last_name = 'USER',
+    password_hash = NULL,
+    totp_secret = NULL,
+    totp_enabled = false,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: GetUserDataExport :one
+-- Returns profile data for GDPR export. Explicitly lists columns to EXCLUDE
+-- sensitive fields (password_hash, totp_secret, activation_token) at the SQL
+-- level, preventing them from ever entering application memory.
+SELECT id, school_id, role, email, phone, first_name, last_name,
+    is_active, gdpr_consent_at, activated_at, last_login_at, created_at
+FROM users WHERE id = $1;
