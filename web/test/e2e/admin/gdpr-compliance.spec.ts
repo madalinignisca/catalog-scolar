@@ -31,7 +31,7 @@
  * ───────────────────────────
  * There is no dedicated frontend UI for GDPR controls yet. We call the API
  * directly from the test (Node.js side) using the global `fetch()` available
- * in Node 18+. Authentication tokens are extracted from localStorage after the
+ * in Node 18+. Authentication uses httpOnly cookies sent automatically via
  * auth fixture completes login.
  *
  * NOTE: We deliberately do NOT test the delete endpoint in the E2E suite because
@@ -77,33 +77,6 @@ const API_BASE = 'http://localhost:8080/api/v1';
  * Used to verify the export profile's id field matches the authenticated user.
  */
 const PARENT_ION_ID = 'b1000000-0000-0000-0000-000000000301';
-
-// ── Helper: extract the access token from the authenticated browser ────────────
-
-/**
- * getAccessToken
- *
- * Reads the JWT access token stored in localStorage by the auth fixture.
- * The auth fixture logs in via the real Go API and writes tokens to:
- *   - localStorage.catalogro_access_token  (the JWT)
- *   - localStorage.catalogro_refresh_token (the refresh token)
- *
- * @param page - A Playwright Page that is already authenticated.
- * @returns The JWT access token string, or throws if it is missing.
- */
-async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
-  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
-
-  if (token === null || token === '') {
-    throw new Error(
-      'catalogro_access_token not found in localStorage. ' +
-        'Did the auth fixture complete login successfully?',
-    );
-  }
-
-  return token;
-}
-
 // ── Helper types ───────────────────────────────────────────────────────────────
 
 /**
@@ -204,20 +177,12 @@ test.describe('GDPR compliance endpoints', () => {
      * Step 1: Get the parent's JWT access token.
      * The auth fixture already logged in as Ion Moldovan (parent, no MFA).
      */
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 2: Call POST /api/v1/users/me/gdpr/consent.
      * No request body is needed — the authenticated POST is the consent act itself.
      * The handler reads the user ID from the JWT and updates gdpr_consent_at.
      */
-    const response = await fetch(`${API_BASE}/users/me/gdpr/consent`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await parentPage.request.post(`${API_BASE}/users/me/gdpr/consent`);
 
     /**
      * Step 3: Assert HTTP 200 OK.
@@ -227,8 +192,8 @@ test.describe('GDPR compliance endpoints', () => {
      * A 500 means the handler encountered a DB or context error.
      */
     expect(
-      response.status,
-      `Expected 200 OK from POST /users/me/gdpr/consent, got ${String(response.status)}. ` +
+      response.status(),
+      `Expected 200 OK from POST /users/me/gdpr/consent, got ${String(response.status())}. ` +
         'Check that the route is wired to userHandler.RecordConsent in main.go.',
     ).toBe(200);
 
@@ -295,26 +260,18 @@ test.describe('GDPR compliance endpoints', () => {
     /**
      * Step 1: Get Ion Moldovan's access token.
      */
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 2: Call POST /api/v1/users/me/gdpr/export.
      * No body required — the handler uses the JWT to identify the requesting user.
      */
-    const response = await fetch(`${API_BASE}/users/me/gdpr/export`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await parentPage.request.post(`${API_BASE}/users/me/gdpr/export`);
 
     /**
      * Step 3: Assert HTTP 200 OK.
      */
     expect(
-      response.status,
-      `Expected 200 OK from POST /users/me/gdpr/export, got ${String(response.status)}. ` +
+      response.status(),
+      `Expected 200 OK from POST /users/me/gdpr/export, got ${String(response.status())}. ` +
         'Check that the route is wired to userHandler.ExportData in main.go.',
     ).toBe(200);
 
@@ -395,26 +352,18 @@ test.describe('GDPR compliance endpoints', () => {
     /**
      * Step 1: Get Ion Moldovan's access token.
      */
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 2: Call the data export endpoint.
      */
-    const response = await fetch(`${API_BASE}/users/me/gdpr/export`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await parentPage.request.post(`${API_BASE}/users/me/gdpr/export`);
 
     /**
      * Step 3: Assert HTTP 200 OK.
      * If this fails, the security assertions below are irrelevant.
      */
     expect(
-      response.status,
-      `Expected 200 OK from POST /users/me/gdpr/export, got ${String(response.status)}.`,
+      response.status(),
+      `Expected 200 OK from POST /users/me/gdpr/export, got ${String(response.status())}.`,
     ).toBe(200);
 
     /**

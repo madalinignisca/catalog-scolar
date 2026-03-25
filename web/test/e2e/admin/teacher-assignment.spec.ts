@@ -42,7 +42,7 @@
  * There is no frontend UI for teacher assignment yet. We call the API directly
  * from the test (Node.js side) using the `fetch()` global available in Node 18+.
  *
- * Authentication tokens are extracted from localStorage via page.evaluate()
+ * Authentication uses httpOnly cookies sent automatically by page.request
  * after the auth fixture has completed login.
  *
  * FIXTURES USED
@@ -112,30 +112,6 @@ const TEACHER_ION_ID = 'b1000000-0000-0000-0000-000000000011';
  * Teaches MAT in class6B but NOT EFS. Safe target for the success test.
  */
 const TEACHER_GAB_ID = 'b1000000-0000-0000-0000-000000000012';
-
-// ── Helper: extract the access token from the authenticated browser ────────────
-
-/**
- * getAccessToken
- *
- * Reads the JWT access token stored in localStorage by the auth fixture.
- *
- * @param page - A Playwright Page that is already authenticated.
- * @returns The JWT access token string, or throws if it is missing.
- */
-async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
-  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
-
-  if (token === null || token === '') {
-    throw new Error(
-      'catalogro_access_token not found in localStorage. ' +
-        'Did the auth fixture complete login successfully?',
-    );
-  }
-
-  return token;
-}
-
 // ── Helper types ───────────────────────────────────────────────────────────────
 
 /**
@@ -217,31 +193,24 @@ test.describe('teacher assignment management', () => {
      * Step 1: Get the admin's JWT access token.
      * The auth fixture already completed login + MFA for Maria Popescu.
      */
-    const token = await getAccessToken(adminPage);
-
     /**
      * Step 2: Call POST /api/v1/classes/{classId}/teachers.
      * Assign Gabriela Marin to EFS in class6B with 2 hours per week.
      */
-    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
+    const response = await adminPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
+      data: {
         subject_id: SUBJECT_EFS_ID,
         teacher_id: TEACHER_GAB_ID,
         hours_per_week: 2,
-      }),
+      },
     });
 
     /**
      * Step 3: Assert HTTP 201 Created.
      */
     expect(
-      response.status,
-      `Expected 201 Created but got ${String(response.status)}. ` +
+      response.status(),
+      `Expected 201 Created but got ${String(response.status())}. ` +
         'Check that the admin role is authorised for POST /teachers and ' +
         'that the (class, subject, teacher) triple does not already exist.',
     ).toBe(201);
@@ -291,43 +260,36 @@ test.describe('teacher assignment management', () => {
   //     and subject_id matching SUBJECT_EFS_ID.
   // ───────────────────────────────────────────────────────────────────────────
   test('93 – assignment appears in GET teachers list', async ({ adminPage }) => {
-    const token = await getAccessToken(adminPage);
-
     /**
      * Step 1: Ensure the assignment exists.
      * Accept both 201 (newly created) and 409 (already assigned from Test 92
      * in the same test session) — either way the assignment exists in the DB.
      */
-    const assignResponse = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+    const assignResponse = await adminPage.request.post(
+      `${API_BASE}/classes/${CLASS_6B_ID}/teachers`,
+      {
+        data: {
+          subject_id: SUBJECT_EFS_ID,
+          teacher_id: TEACHER_GAB_ID,
+          hours_per_week: 2,
+        },
       },
-      body: JSON.stringify({
-        subject_id: SUBJECT_EFS_ID,
-        teacher_id: TEACHER_GAB_ID,
-        hours_per_week: 2,
-      }),
-    });
+    );
 
     expect(
-      [201, 409].includes(assignResponse.status),
-      `Prerequisite: expected 201 or 409 from POST /teachers, got ${String(assignResponse.status)}.`,
+      [201, 409].includes(assignResponse.status()),
+      `Prerequisite: expected 201 or 409 from POST /teachers, got ${String(assignResponse.status())}.`,
     ).toBe(true);
 
     /**
      * Step 2: Fetch the teacher assignments for class6B.
      * GET /api/v1/classes/{classId}/teachers returns all teacher-subject pairs.
      */
-    const listResponse = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const listResponse = await adminPage.request.get(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`);
 
     expect(
-      listResponse.status,
-      `Expected 200 OK from GET /classes/${CLASS_6B_ID}/teachers, got ${String(listResponse.status)}.`,
+      listResponse.status(),
+      `Expected 200 OK from GET /classes/${CLASS_6B_ID}/teachers, got ${String(listResponse.status())}.`,
     ).toBe(200);
 
     const listBody = (await listResponse.json()) as TeachersListResponse;
@@ -369,23 +331,16 @@ test.describe('teacher assignment management', () => {
   //   - Response body contains { "error": { "code": "DUPLICATE_ASSIGNMENT", ... } }.
   // ───────────────────────────────────────────────────────────────────────────
   test('94 – duplicate assignment returns 409 Conflict', async ({ adminPage }) => {
-    const token = await getAccessToken(adminPage);
-
     /**
      * Try to assign Ion Vasilescu to Istorie in class6B.
      * This combination is already present via seed data, so the unique constraint
      * fires immediately — no additional setup is needed.
      */
-    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
+    const response = await adminPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
+      data: {
         subject_id: SUBJECT_IST_ID,
         teacher_id: TEACHER_ION_ID,
-      }),
+      },
     });
 
     /**
@@ -397,8 +352,8 @@ test.describe('teacher assignment management', () => {
      * A 500 here means the handler is not catching pgconn error code 23505.
      */
     expect(
-      response.status,
-      `Expected 409 Conflict for duplicate assignment, got ${String(response.status)}. ` +
+      response.status(),
+      `Expected 409 Conflict for duplicate assignment, got ${String(response.status())}. ` +
         'The handler must detect pgconn error 23505 and return 409.',
     ).toBe(409);
 
@@ -435,22 +390,15 @@ test.describe('teacher assignment management', () => {
     /**
      * The parent fixture is logged in as Ion Moldovan (role: parent, no MFA).
      */
-    const token = await getAccessToken(parentPage);
-
     /**
      * Attempt to assign a teacher with the parent's Bearer token.
      * The API must inspect the `role` claim in the JWT and reject it with 403.
      */
-    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
+    const response = await parentPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/teachers`, {
+      data: {
         subject_id: SUBJECT_EFS_ID,
         teacher_id: TEACHER_GAB_ID,
-      }),
+      },
     });
 
     /**
@@ -464,9 +412,9 @@ test.describe('teacher assignment management', () => {
      * able to assign teachers to subjects in a class.
      */
     expect(
-      response.status,
+      response.status(),
       `Expected 403 Forbidden for a parent calling POST /teachers, ` +
-        `but got ${String(response.status)}. ` +
+        `but got ${String(response.status())}. ` +
         'This is an access-control failure — only admin may assign teachers.',
     ).toBe(403);
   });

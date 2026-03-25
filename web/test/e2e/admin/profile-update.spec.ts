@@ -38,7 +38,7 @@
  * ───────────────────────────
  * There is no dedicated frontend UI for profile editing yet. We call the API
  * directly from the test (Node.js side) using the global `fetch()` available
- * in Node 18+. Authentication tokens are extracted from localStorage after the
+ * in Node 18+. Authentication uses httpOnly cookies sent automatically via
  * auth fixture completes login.
  *
  * FIXTURES USED
@@ -70,40 +70,6 @@ import { test, expect } from '../fixtures/auth.fixture';
  * The Go server listens on :8080 by default (see api/cmd/server/main.go).
  */
 const API_BASE = 'http://localhost:8080/api/v1';
-
-// ── Helper: extract the access token from the authenticated browser ────────────
-
-/**
- * getAccessToken
- *
- * Reads the JWT access token that the auth fixture stored in localStorage.
- * The auth fixture logs in via the real API and writes tokens to:
- *   localStorage['catalogro_access_token']  → short-lived JWT (15 min)
- *   localStorage['catalogro_refresh_token'] → long-lived refresh (7 days)
- *
- * We read the access token here to attach it as a Bearer header when calling
- * the API directly from the test's Node.js process.
- *
- * NOTE: `page.evaluate()` runs JavaScript inside the browser context —
- * that is where localStorage lives. The result is returned to Node.js.
- *
- * @param page - A Playwright Page instance that is already authenticated.
- * @returns The JWT access token string, or throws if it is missing.
- */
-async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
-  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
-
-  if (token === null || token === '') {
-    // This should never happen if the auth fixture ran successfully.
-    throw new Error(
-      'catalogro_access_token not found in localStorage. ' +
-        'Did the auth fixture complete login successfully?',
-    );
-  }
-
-  return token;
-}
-
 // ── Helper types ───────────────────────────────────────────────────────────────
 
 /**
@@ -187,10 +153,8 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
     /**
      * Step 1: Get Ion Moldovan's access token from the authenticated browser.
      * The auth fixture completed login (email + password, no MFA for parents)
-     * and stored the token in localStorage.
+     * and stored the httpOnly auth cookie.
      */
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 2: Choose a test phone number.
      * We use a fixed value because the test is idempotent — repeating it
@@ -208,13 +172,8 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
      * Using Node's global fetch() keeps this outside the browser context,
      * which avoids CORS pre-flight complications in the test environment.
      */
-    const response = await fetch(`${API_BASE}/users/me`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ phone: newPhone }),
+    const response = await parentPage.request.put(`${API_BASE}/users/me`, {
+      data: { phone: newPhone },
     });
 
     /**
@@ -224,8 +183,8 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
      * payload validation is too strict. If we get 500, it is a server bug.
      */
     expect(
-      response.status,
-      `Expected 200 OK from PUT /api/v1/users/me but got ${String(response.status)}. ` +
+      response.status(),
+      `Expected 200 OK from PUT /api/v1/users/me but got ${String(response.status())}. ` +
         'Verify that the parent role can access this endpoint (no RequireRole restriction).',
     ).toBe(200);
 
@@ -288,8 +247,6 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
   //   - response.data.phone from GET matches the value sent in the PUT.
   // ───────────────────────────────────────────────────────────────────────────
   test('B – updated phone appears in GET /users/me response', async ({ parentPage }) => {
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 1: Update the phone via PUT.
      * We use a different phone value than Test A to make this test's assertion
@@ -297,19 +254,14 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
      */
     const phoneForThisTest = '0741-000-099';
 
-    const putResponse = await fetch(`${API_BASE}/users/me`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ phone: phoneForThisTest }),
+    const putResponse = await parentPage.request.put(`${API_BASE}/users/me`, {
+      data: { phone: phoneForThisTest },
     });
 
     // The PUT must succeed before we check GET — fail fast if it does not.
     expect(
-      putResponse.status,
-      `Prerequisite failed: PUT /api/v1/users/me returned ${String(putResponse.status)}. ` +
+      putResponse.status(),
+      `Prerequisite failed: PUT /api/v1/users/me returned ${String(putResponse.status())}. ` +
         'Cannot verify GET round-trip without a successful PUT first.',
     ).toBe(200);
 
@@ -318,16 +270,11 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
      * This endpoint returns the stored record for the authenticated user.
      * It is distinct from the PUT handler but reads the same DB row.
      */
-    const getResponse = await fetch(`${API_BASE}/users/me`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const getResponse = await parentPage.request.get(`${API_BASE}/users/me`);
 
     expect(
-      getResponse.status,
-      `Expected 200 OK from GET /api/v1/users/me but got ${String(getResponse.status)}.`,
+      getResponse.status(),
+      `Expected 200 OK from GET /api/v1/users/me but got ${String(getResponse.status())}.`,
     ).toBe(200);
 
     /**
@@ -369,20 +316,13 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
   // change the user-facing message without breaking this test.
   // ───────────────────────────────────────────────────────────────────────────
   test('C – invalid email (missing @) returns 400 INVALID_EMAIL', async ({ parentPage }) => {
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 1: Call PUT /api/v1/users/me with an email that lacks "@".
      * "notanemailaddress" has no "@" character, which is our validation rule.
      * The handler must reject this BEFORE calling the database.
      */
-    const response = await fetch(`${API_BASE}/users/me`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ email: 'notanemailaddress' }),
+    const response = await parentPage.request.put(`${API_BASE}/users/me`, {
+      data: { email: 'notanemailaddress' },
     });
 
     /**
@@ -394,9 +334,9 @@ test.describe('profile update (PUT /api/v1/users/me)', () => {
      * 400 is the correct response for a client validation failure.
      */
     expect(
-      response.status,
+      response.status(),
       `Expected 400 Bad Request for an email without "@", ` +
-        `but got ${String(response.status)}. ` +
+        `but got ${String(response.status())}. ` +
         'The handler must validate email format before calling the database.',
     ).toBe(400);
 

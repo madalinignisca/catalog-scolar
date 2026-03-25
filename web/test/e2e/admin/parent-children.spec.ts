@@ -39,7 +39,7 @@
  * directly from the test (Node.js side) using the `fetch()` global available
  * in Node 18+.
  *
- * Authentication tokens are extracted from localStorage via page.evaluate()
+ * Authentication uses httpOnly cookies sent automatically by page.request
  * after the auth fixture has completed login.
  *
  * FIXTURES USED
@@ -83,30 +83,6 @@ const STUDENT_ANDREI_ID = 'b1000000-0000-0000-0000-000000000101';
  * Seeded in api/db/seed.sql. Andrei Moldovan is enrolled in this class.
  */
 const CLASS_2A_ID = 'f1000000-0000-0000-0000-000000000001';
-
-// ── Helper: extract the access token from the authenticated browser ────────────
-
-/**
- * getAccessToken
- *
- * Reads the JWT access token stored in localStorage by the auth fixture.
- *
- * @param page - A Playwright Page that is already authenticated.
- * @returns The JWT access token string, or throws if it is missing.
- */
-async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
-  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
-
-  if (token === null || token === '') {
-    throw new Error(
-      'catalogro_access_token not found in localStorage. ' +
-        'Did the auth fixture complete login successfully?',
-    );
-  }
-
-  return token;
-}
-
 // ── Helper types ───────────────────────────────────────────────────────────────
 
 /**
@@ -167,18 +143,11 @@ test.describe('parent children view', () => {
      * Step 1: Get the parent's JWT access token.
      * The auth fixture already completed login for Ion Moldovan (no MFA required).
      */
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 2: Call GET /api/v1/users/me/children with the parent's token.
      * The handler reads the user ID from the JWT and queries parent_student_links.
      */
-    const response = await fetch(`${API_BASE}/users/me/children`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const response = await parentPage.request.get(`${API_BASE}/users/me/children`);
 
     /**
      * Step 3: Assert HTTP 200 OK.
@@ -188,8 +157,8 @@ test.describe('parent children view', () => {
      * A 500 means the handler encountered a DB or context error.
      */
     expect(
-      response.status,
-      `Expected 200 OK from GET /users/me/children, got ${String(response.status)}. ` +
+      response.status(),
+      `Expected 200 OK from GET /users/me/children, got ${String(response.status())}. ` +
         'Check that the route is wired and the handler is implemented.',
     ).toBe(200);
 
@@ -246,21 +215,14 @@ test.describe('parent children view', () => {
   //   - The class_education_level for that child is "primary".
   // ───────────────────────────────────────────────────────────────────────────
   test('97 – children response includes class info', async ({ parentPage }) => {
-    const token = await getAccessToken(parentPage);
-
     /**
      * Call the endpoint as Ion Moldovan.
      */
-    const response = await fetch(`${API_BASE}/users/me/children`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const response = await parentPage.request.get(`${API_BASE}/users/me/children`);
 
     expect(
-      response.status,
-      `Expected 200 OK from GET /users/me/children, got ${String(response.status)}.`,
+      response.status(),
+      `Expected 200 OK from GET /users/me/children, got ${String(response.status())}.`,
     ).toBe(200);
 
     const body = (await response.json()) as ChildrenListResponse;
@@ -336,19 +298,12 @@ test.describe('parent children view', () => {
   //   - That child has last_name="Moldovan".
   // ───────────────────────────────────────────────────────────────────────────
   test('98 – response includes correct child name (Andrei Moldovan)', async ({ parentPage }) => {
-    const token = await getAccessToken(parentPage);
-
     /**
      * Step 1: Call GET /api/v1/users/me/children as Ion Moldovan.
      */
-    const response = await fetch(`${API_BASE}/users/me/children`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    const response = await parentPage.request.get(`${API_BASE}/users/me/children`);
 
-    expect(response.status, `Expected 200 OK, got ${String(response.status)}.`).toBe(200);
+    expect(response.status(), `Expected 200 OK, got ${String(response.status())}.`).toBe(200);
 
     const body = (await response.json()) as ChildrenListResponse;
 

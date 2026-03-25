@@ -125,65 +125,27 @@ const API_BASE = 'http://localhost:8080/api/v1';
 // ── Login helper ──────────────────────────────────────────────────────────────
 
 /**
- * gotoWithRetry
- *
- * Navigates to a URL and retries once on failure (e.g. net::ERR_ABORTED).
- * The Nuxt dev server can intermittently refuse connections when it is
- * busy compiling after a cold start or after many concurrent test suites.
- * Retrying once with a 1-second delay resolves the majority of these
- * transient failures without masking real routing bugs.
- *
- * @param page    - Playwright Page instance.
- * @param url     - URL to navigate to (relative or absolute).
- * @param timeout - waitForURL timeout in ms (default 15 000).
- */
-async function gotoWithRetry(page: Page, url: string, timeout = 15_000): Promise<void> {
-  try {
-    // First attempt — most runs succeed here.
-    await page.goto(url);
-  } catch {
-    // Navigation failed (e.g. net::ERR_ABORTED). Wait 1 s and retry once.
-    // We swallow the first error intentionally: the retry is the recovery.
-    await page.waitForTimeout(1_000);
-    await page.goto(url);
-  }
-  // After a successful goto, wait for the URL to stabilise on the target path.
-  // For '/' we check the pathname exactly; for other paths we check containment.
-  // We swallow timeouts here — the caller's own assertions will surface any
-  // real page-state issues. This prevents a double error stack on slow CI.
-  await page
-    .waitForURL((u) => (url === '/' ? u.pathname === '/' : u.toString().includes(url)), { timeout })
-    .catch(() => {
-      /* intentionally swallowed — see above */
-    });
-}
-
-/**
  * performLogin
  *
- * Authenticates by calling the API directly (not through the UI) and injects
- * the resulting JWT tokens into the browser's localStorage. Then navigates
- * to the dashboard.
+ * Authenticates a Playwright browser page by calling the login API via the
+ * browser's fetch (not Node.js fetch). This ensures the httpOnly cookies
+ * set by the API response are stored in the browser's cookie jar.
  *
- * WHY API-BASED LOGIN?
- * ────────────────────
- * Fixtures need a fast, reliable way to get an authenticated browser session.
- * Driving the login UI in fixtures was unreliable — the MFA form's submit
- * button click intermittently failed to trigger Vue's @submit.prevent handler
- * due to SSR hydration timing. Calling the API directly bypasses all UI
- * interaction issues while still using real authentication (real tokens from
- * the real backend).
+ * WHY BROWSER-BASED API LOGIN?
+ * ────────────────────────────
+ * With cookie-based auth (#35), the Go API sets httpOnly cookies on the
+ * login response. These cookies are automatically sent with all subsequent
+ * requests (via credentials: 'include'). To get these cookies into the
+ * Playwright browser context, we must call the login API from within the
+ * browser (page.evaluate + fetch), not from Node.js.
+ *
+ * This approach is simpler and more reliable than the old localStorage
+ * injection method:
+ *   - No need to navigate to /login first to set up the origin
+ *   - No localStorage injection → no race with SSR hydration
+ *   - No retry/reinject logic needed — cookies just work
  *
  * The login UI itself is thoroughly tested in auth/login.spec.ts (tests 1-9).
- *
- * RESILIENCE NOTES
- * ────────────────
- * Each page.goto() call is wrapped in a retry helper (gotoWithRetry) to
- * handle transient net::ERR_ABORTED errors that occur when the Nuxt dev
- * server is under load during parallel test execution. After injecting
- * tokens and navigating to '/', we also verify we are NOT on '/login' — if
- * the Nuxt auth middleware redirected us back, we reinject tokens and retry
- * the navigation once more.
  *
  * @param page - Playwright Page instance.
  * @param user - User credentials from TEST_USERS.
@@ -192,96 +154,69 @@ async function performLogin(
   page: Page,
   user: (typeof TEST_USERS)[keyof typeof TEST_USERS],
 ): Promise<void> {
-  // Step 1: Call the login API endpoint directly from Node.js.
-  const loginResponse = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: user.email, password: user.password }),
-  });
+  // Step 1: Navigate to the app so the browser has the correct origin.
+  // We need to be on localhost:3000 before making cross-origin requests
+  // to localhost:8080, so the browser can store the response cookies.
+  await page.goto('/login');
 
-  if (!loginResponse.ok) {
-    throw new Error(`Login API failed for ${user.email}: ${String(loginResponse.status)}`);
-  }
-
-  const loginData = (await loginResponse.json()) as {
-    data: {
-      access_token?: string;
-      refresh_token?: string;
-      mfa_required?: boolean;
-      mfa_token?: string;
-    };
-  };
-
-  let accessToken = loginData.data.access_token;
-  let refreshToken = loginData.data.refresh_token;
-
-  // Step 2: If MFA is required, call the 2FA verification endpoint.
-  if (loginData.data.mfa_required === true && loginData.data.mfa_token !== undefined) {
-    const code = await generateTOTP(TEST_TOTP_SECRET);
-
-    const mfaResponse = await fetch(`${API_BASE}/auth/2fa/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mfa_token: loginData.data.mfa_token,
-        totp_code: code,
-      }),
-    });
-
-    if (!mfaResponse.ok) {
-      throw new Error(`MFA API failed for ${user.email}: ${String(mfaResponse.status)}`);
-    }
-
-    const mfaData = (await mfaResponse.json()) as {
-      data: { access_token: string; refresh_token: string };
-    };
-    accessToken = mfaData.data.access_token;
-    refreshToken = mfaData.data.refresh_token;
-  }
-
-  if (accessToken === undefined || refreshToken === undefined) {
-    throw new Error(`No tokens received for ${user.email}`);
-  }
-
-  // Step 3: Navigate to the app and inject tokens into localStorage.
-  // We must navigate first because localStorage is origin-scoped — we need
-  // the page to be on localhost:3000 before we can set localStorage keys.
-  // gotoWithRetry handles transient net::ERR_ABORTED from the dev server.
-  await gotoWithRetry(page, '/login');
-
-  // Inject the tokens we obtained from the API into the browser's
-  // localStorage so the Nuxt auth composable picks them up on next navigation.
-  await page.evaluate(
-    ({ access, refresh }) => {
-      localStorage.setItem('catalogro_access_token', access);
-      localStorage.setItem('catalogro_refresh_token', refresh);
+  // Step 2: Call the login API from within the browser context.
+  // This ensures httpOnly cookies from the response are stored in the
+  // browser's cookie jar (not accessible from Node.js, only from the browser).
+  const loginResult = await page.evaluate(
+    async ({ apiBase, email, password }) => {
+      const res = await fetch(`${apiBase}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+        credentials: 'include',
+      });
+      if (!res.ok) return { ok: false as const, status: res.status };
+      const json = (await res.json()) as {
+        data: {
+          mfa_required?: boolean;
+          mfa_token?: string;
+        };
+      };
+      return { ok: true as const, data: json.data };
     },
-    { access: accessToken, refresh: refreshToken },
+    { apiBase: API_BASE, email: user.email, password: user.password },
   );
 
-  // Step 4: Navigate to the dashboard. The Nuxt app will read the tokens
-  // from localStorage and render the authenticated view.
-  // gotoWithRetry handles net::ERR_ABORTED on the second navigation too.
-  await gotoWithRetry(page, '/');
-
-  // Step 5: Verify we ended up on '/' and NOT on '/login'.
-  // If the Nuxt auth middleware redirected us back to /login (e.g. because
-  // the token injection happened before SSR hydration read localStorage),
-  // we reinject the tokens and attempt one more navigation to '/'.
-  const currentUrl = page.url();
-  if (currentUrl.includes('/login')) {
-    // Tokens may not have survived the navigation — reinject them.
-    await page.evaluate(
-      ({ access, refresh }) => {
-        localStorage.setItem('catalogro_access_token', access);
-        localStorage.setItem('catalogro_refresh_token', refresh);
-      },
-      { access: accessToken, refresh: refreshToken },
-    );
-    // Navigate to dashboard one more time after reinjecting tokens.
-    await page.goto('/');
-    await page.waitForURL((url) => url.pathname === '/', { timeout: 15_000 });
+  if (!loginResult.ok) {
+    throw new Error(`Login API failed for ${user.email}: ${String(loginResult.status)}`);
   }
+
+  // Step 3: If MFA is required, generate TOTP code and call 2FA endpoint.
+  if (loginResult.data.mfa_required === true && loginResult.data.mfa_token !== undefined) {
+    const code = await generateTOTP(TEST_TOTP_SECRET);
+
+    const mfaResult = await page.evaluate(
+      async ({ apiBase, mfaToken, totpCode }) => {
+        const res = await fetch(`${apiBase}/auth/2fa/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mfa_token: mfaToken, totp_code: totpCode }),
+          credentials: 'include',
+        });
+        return { ok: res.ok, status: res.status };
+      },
+      { apiBase: API_BASE, mfaToken: loginResult.data.mfa_token, totpCode: code },
+    );
+
+    if (!mfaResult.ok) {
+      throw new Error(`MFA API failed for ${user.email}: ${String(mfaResult.status)}`);
+    }
+  }
+
+  // Step 4: Navigate to the dashboard. The browser now has httpOnly auth
+  // cookies, so the Nuxt SSR request will include them automatically.
+  // No localStorage injection needed — cookies are sent with every request.
+  await page.goto('/');
+  await page
+    .waitForURL((url) => url.pathname === '/', { timeout: 15_000 })
+    .catch(() => {
+      /* swallow — test assertions will catch real issues */
+    });
 }
 
 // ── Fixture type declarations ─────────────────────────────────────────────────
