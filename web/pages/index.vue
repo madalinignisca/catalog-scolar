@@ -66,10 +66,10 @@ interface Child {
   firstName: string;
   lastName: string;
   email: string;
-  role: string;
-  classId: string;
-  className: string;
-  classEducationLevel: string;
+  role: 'student';
+  classId: string | null;
+  className: string | null;
+  classEducationLevel: 'primary' | 'middle' | 'high' | null;
 }
 
 /**
@@ -455,7 +455,7 @@ function openClass(classItem: TeacherClass): void {
       >
         <!-- Child's full name: last name first, matching Romanian convention -->
         <h3 class="text-lg font-semibold text-gray-900">
-          {{ child.firstName }} {{ child.lastName }}
+          {{ child.lastName }} {{ child.firstName }}
         </h3>
 
         <!-- Class name and education level badge -->
