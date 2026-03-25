@@ -885,3 +885,307 @@ func TestListPendingActivations_ReturnsOnlyPending(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Test 7: ListChildren — parent sees their linked child with class info
+// ---------------------------------------------------------------------------
+
+// TestListChildren_ParentSeesChild verifies the GET /users/me/children endpoint
+// happy path for a parent who has one linked child enrolled in a class.
+//
+// Scenario:
+//   - We seed schools, users, and a class via the standard helpers.
+//   - SeedUsers creates a parent→student link automatically.
+//   - SeedClass creates a class (9A), a subject (Matematică), and enrolls the
+//     seeded student in that class.
+//   - ListChildren is called as the parent user.
+//   - The response must contain exactly one child with the correct name and
+//     class fields (class_name "9A", class_education_level "high").
+//
+// This test exercises the enhanced query that JOINs class_enrollments and classes
+// — the old query only returned user rows without class info.
+func TestListChildren_ParentSeesChild(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	// Start (or reuse) the shared Postgres container, truncate all rows so
+	// we start clean, then insert the minimal reference data this test needs.
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	// SeedSchools creates two schools (school1 and school2) plus one school year
+	// each. We only use school1 in this test.
+	school1ID, _ := testutil.SeedSchools(t, pool)
+
+	// SeedUsers creates one user per role (admin, secretary, teacher, parent, student)
+	// and also creates a parent_student_links row linking the parent to the student.
+	// It returns a map from role name → UUID so we can reference them by name below.
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	parentID := users1["parent"]
+	teacherID := users1["teacher"]
+	studentID := users1["student"]
+
+	// SeedClass creates a 9A (high school) class, a Matematică subject,
+	// enrolls the student in the class, and assigns the teacher to the subject.
+	// Returns the class UUID which we do not need here (we assert via the response).
+	testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// Verify seeded IDs are valid (defensive — deterministicID should never panic).
+	if parentID == (uuid.UUID{}) {
+		t.Fatal("TestListChildren_ParentSeesChild: parentID is zero — SeedUsers may have failed")
+	}
+	if studentID == (uuid.UUID{}) {
+		t.Fatal("TestListChildren_ParentSeesChild: studentID is zero — SeedUsers may have failed")
+	}
+
+	// -----------------------------------------------------------------------
+	// 2. Build the request and inject the parent's auth context.
+	// -----------------------------------------------------------------------
+	// getRequest("/users/me/children") builds a GET request.
+	// withTenantContext begins a PG transaction, sets the RLS school_id to school1,
+	// creates a transaction-scoped Queries, and injects it + fake Claims (as the
+	// parent user) into the request context.
+	req := getRequest("/users/me/children")
+	req, rollback := withTenantContext(t, pool, req, school1ID, parentID, "parent")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the ListChildren handler.
+	// -----------------------------------------------------------------------
+	// We call the handler directly, bypassing the chi router. The handler reads
+	// the user ID from the JWT claims in context (parentID).
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.ListChildren(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 4. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChildren: expected 200, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 5. Decode the list and assert count.
+	// -----------------------------------------------------------------------
+	// The parent has exactly one linked child (seeded by SeedUsers via
+	// the parent_student_links INSERT). Expect exactly one entry in the array.
+	items := decodeDataList(t, rr)
+
+	if len(items) != 1 {
+		t.Fatalf("ListChildren: expected 1 child, got %d — body: %s", len(items), rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Assert child identity and class fields.
+	// -----------------------------------------------------------------------
+	child, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("ListChildren: expected item to be a JSON object, got %T", items[0])
+	}
+
+	// The child's ID must match the seeded student UUID.
+	gotID, _ := child["id"].(string)
+	if gotID != studentID.String() {
+		t.Errorf("ListChildren: expected child id=%s, got %q", studentID, gotID)
+	}
+
+	// The role must always be "student" for linked children.
+	gotRole, _ := child["role"].(string)
+	if gotRole != "student" {
+		t.Errorf("ListChildren: expected role='student', got %q", gotRole)
+	}
+
+	// first_name and last_name must be present (non-empty).
+	if fn, _ := child["first_name"].(string); fn == "" {
+		t.Errorf("ListChildren: expected non-empty first_name, got empty")
+	}
+	if ln, _ := child["last_name"].(string); ln == "" {
+		t.Errorf("ListChildren: expected non-empty last_name, got empty")
+	}
+
+	// class_name must be "9A" — that is what SeedClass creates (grade 9, education_level "high").
+	gotClassName, _ := child["class_name"].(string)
+	if gotClassName != "9A" {
+		t.Errorf("ListChildren: expected class_name='9A', got %q", gotClassName)
+	}
+
+	// class_education_level must be "high" — SeedClass creates a high-school class.
+	gotEduLevel, _ := child["class_education_level"].(string)
+	if gotEduLevel != "high" {
+		t.Errorf("ListChildren: expected class_education_level='high', got %q", gotEduLevel)
+	}
+
+	// class_id must be a non-empty UUID string.
+	gotClassID, _ := child["class_id"].(string)
+	if gotClassID == "" {
+		t.Errorf("ListChildren: expected non-empty class_id, got empty")
+	}
+	if _, err := uuid.Parse(gotClassID); err != nil {
+		t.Errorf("ListChildren: class_id is not a valid UUID: %q", gotClassID)
+	}
+
+	// Sensitive fields must NOT be present in the response.
+	rawBody := rr.Body.String()
+	for _, field := range []string{"password_hash", "totp_secret", "activation_token"} {
+		if strings.Contains(rawBody, `"`+field+`"`) {
+			t.Errorf("ListChildren: response must NOT contain field %q\nbody: %s", field, rawBody)
+		}
+	}
+
+	t.Logf("ListChildren: parent %s sees child %s in class 9A (high)", parentID, studentID)
+}
+
+// ---------------------------------------------------------------------------
+// Test 8: ListChildren — returns empty array for user with no linked children
+// ---------------------------------------------------------------------------
+
+// TestListChildren_EmptyForUserWithNoChildren verifies that GET /users/me/children
+// returns an empty JSON array (not null, not an error) when the authenticated user
+// has no entries in parent_student_links.
+//
+// Scenario:
+//   - We seed a school and users but do NOT call SeedClass or create any link.
+//   - We call ListChildren as the teacher user (who has no linked children).
+//   - The response must be HTTP 200 with { "data": [] }.
+//
+// Why this matters:
+//   - A null response or an error response for "no children" would break the
+//     frontend, which expects to always receive an iterable array.
+//   - A teacher calling this endpoint for communication purposes must get an
+//     empty list, not a 403 or 500.
+func TestListChildren_EmptyForUserWithNoChildren(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up: school + users, but NO parent_student_links for the teacher.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+
+	// Call as the teacher — who has no children linked to them.
+	teacherID := users1["teacher"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build the request and inject the teacher's auth context.
+	// -----------------------------------------------------------------------
+	req := getRequest("/users/me/children")
+	req, rollback := withTenantContext(t, pool, req, school1ID, teacherID, "teacher")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.ListChildren(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 4. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	// Even with no children, the handler should return 200, not 404 or 500.
+	// An empty dataset is not an error.
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChildren (empty): expected 200, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 5. Assert the response is an empty array (not null).
+	// -----------------------------------------------------------------------
+	items := decodeDataList(t, rr)
+
+	if len(items) != 0 {
+		t.Errorf("ListChildren (empty): expected 0 items, got %d — body: %s", len(items), rr.Body.String())
+	}
+
+	// The raw JSON must contain [] (empty array), not null or omitted.
+	rawBody := rr.Body.String()
+	if !strings.Contains(rawBody, `[]`) {
+		t.Errorf("ListChildren (empty): expected '[]' in response body, got: %s", rawBody)
+	}
+
+	t.Logf("ListChildren (empty): teacher %s correctly received empty children list", teacherID)
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: ListChildren — child's class name and education level are correct
+// ---------------------------------------------------------------------------
+
+// TestListChildren_CorrectClassInfo verifies that the class fields in the
+// ListChildren response exactly match what was inserted for the child's class.
+//
+// Scenario:
+//   - We seed school1 with users and a class (9A, high school, Matematică).
+//   - The seeded parent is linked to the seeded student who is enrolled in 9A.
+//   - We then verify that the class_name="9A" and class_education_level="high"
+//     values in the response accurately reflect what SeedClass inserted.
+//
+// This test is a targeted regression test for the JOIN logic in the enhanced
+// ListChildrenForParent query: if the LEFT JOIN to class_enrollments or classes
+// breaks, the class fields would be absent (null) even though the student is enrolled.
+func TestListChildren_CorrectClassInfo(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Full setup: schools, users, class with enrollment.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	parentID := users1["parent"]
+	teacherID := users1["teacher"]
+
+	// SeedClass inserts class "9A" (education_level="high", grade_number=9)
+	// and enrolls the seeded student in it.
+	classID := testutil.SeedClass(t, pool, school1ID, teacherID)
+
+	// -----------------------------------------------------------------------
+	// 2. Call ListChildren as the parent.
+	// -----------------------------------------------------------------------
+	req := getRequest("/users/me/children")
+	req, rollback := withTenantContext(t, pool, req, school1ID, parentID, "parent")
+	defer rollback()
+
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.ListChildren(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 3. Assert 200 OK and at least one child.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChildren (class info): expected 200, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	items := decodeDataList(t, rr)
+	if len(items) == 0 {
+		t.Fatalf("ListChildren (class info): expected at least 1 child, got 0 — body: %s", rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 4. Verify the class_id, class_name, and class_education_level fields.
+	// -----------------------------------------------------------------------
+	child, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("ListChildren (class info): expected item to be a JSON object")
+	}
+
+	// class_id must match the class created by SeedClass.
+	gotClassID, _ := child["class_id"].(string)
+	if gotClassID != classID.String() {
+		t.Errorf("ListChildren (class info): expected class_id=%s, got %q", classID, gotClassID)
+	}
+
+	// class_name must be "9A" — SeedClass always creates a class named "9A".
+	gotClassName, _ := child["class_name"].(string)
+	if gotClassName != "9A" {
+		t.Errorf("ListChildren (class info): expected class_name='9A', got %q", gotClassName)
+	}
+
+	// class_education_level must be "high" — SeedClass uses education_level="high".
+	gotEduLevel, _ := child["class_education_level"].(string)
+	if gotEduLevel != "high" {
+		t.Errorf("ListChildren (class info): expected class_education_level='high', got %q", gotEduLevel)
+	}
+
+	t.Logf("ListChildren (class info): child correctly enrolled in class %s (%s)", gotClassName, gotEduLevel)
+}
