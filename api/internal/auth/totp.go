@@ -26,11 +26,13 @@ package auth
 //  5. Server stores the TOTP secret and sets totp_enabled=true
 
 import (
+	"encoding/base32"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -237,27 +239,30 @@ type verifyRequest struct {
 //
 // Parameters:
 //   - db: sqlc Queries (used to look up the user's email by their UUID)
-func Handle2FASetup(db *generated.Queries) http.HandlerFunc {
+func Handle2FASetup() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Extract the authenticated user's ID from the JWT claims.
-		// GetClaims reads from the context key set by the JWTAuth middleware.
-		// If the middleware didn't run (bug or misconfigured router), claims is nil.
+		// Step 1: Get the transaction-scoped queries from context.
+		// TenantContext middleware sets this up — it includes RLS scope.
+		db := GetQueries(r.Context())
+		if db == nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Database context unavailable")
+			return
+		}
+
+		// Step 2: Extract the authenticated user's ID from the JWT claims.
 		claims := GetClaims(r.Context())
 		if claims == nil {
 			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
 			return
 		}
 
-		// Parse the user ID string into a uuid.UUID for the DB query.
 		userID, err := uuid.Parse(claims.UserID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid user ID in token")
 			return
 		}
 
-		// Step 2: Fetch the user to get their email for the authenticator label.
-		// GetUserByID does not require a specific school context — the user can
-		// only reach here with a valid JWT that already scopes them to a school.
+		// Step 3: Fetch the user to get their email for the authenticator label.
 		user, err := db.GetUserByID(r.Context(), userID)
 		if err != nil {
 			slog.Error("2fa setup: failed to query user", "user_id", userID, "error", err)
@@ -318,9 +323,16 @@ func Handle2FASetup(db *generated.Queries) http.HandlerFunc {
 //
 // Parameters:
 //   - db: sqlc Queries (used to persist the verified secret)
-func Handle2FAVerify(db *generated.Queries) http.HandlerFunc {
+func Handle2FAVerify() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Extract the authenticated user's ID.
+		// Step 1: Get transaction-scoped queries from context.
+		db := GetQueries(r.Context())
+		if db == nil {
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Database context unavailable")
+			return
+		}
+
+		// Step 2: Extract the authenticated user's ID.
 		claims := GetClaims(r.Context())
 		if claims == nil {
 			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
@@ -346,11 +358,20 @@ func Handle2FAVerify(db *generated.Queries) http.HandlerFunc {
 			return
 		}
 
+		// Validate and normalize the secret as base32 (uppercase, padded).
+		// The pquerna/otp library expects valid base32 — garbage input would
+		// cause confusing errors. This gives a clear "bad format" response instead.
+		secretUpper := strings.ToUpper(req.Secret)
+		if _, err := base32.StdEncoding.DecodeString(secretUpper); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid secret format; must be a base32 string")
+			return
+		}
+
 		// Step 3: Validate the TOTP code.
 		// totp.Validate checks the code against the secret at the current time,
 		// accepting +/- one time step (90-second effective window) to account
 		// for clock skew between the user's phone and the server.
-		if !totp.Validate(req.Code, req.Secret) {
+		if !totp.Validate(req.Code, secretUpper) {
 			// Invalid code — tell the client to try again. We use INVALID_CODE
 			// so the UI can show a specific error message (e.g., "Incorrect code.
 			// Make sure your phone's clock is correct and try again.").
@@ -364,7 +385,7 @@ func Handle2FAVerify(db *generated.Queries) http.HandlerFunc {
 		// this should be encrypted with the TOTP_ENCRYPTION_KEY env var before storage.
 		if err := db.SetTOTPSecret(r.Context(), generated.SetTOTPSecretParams{
 			ID:         userID,
-			TotpSecret: []byte(req.Secret),
+			TotpSecret: []byte(secretUpper),
 		}); err != nil {
 			slog.Error("2fa verify: failed to save TOTP secret", "user_id", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to enable 2FA")
