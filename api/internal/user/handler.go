@@ -970,10 +970,13 @@ func (h *Handler) ResendActivation(w http.ResponseWriter, r *http.Request) {
 	// Step 7: Extract activation_sent_at from the updated row for the response.
 	// The ResendActivation SQL sets activation_sent_at = now(), so this field
 	// is guaranteed to be non-null (Valid=true) after a successful UPDATE.
-	var sentAt time.Time
-	if updatedUser.ActivationSentAt.Valid {
-		sentAt = updatedUser.ActivationSentAt.Time
+	// If it's null, something is wrong with the DB — fail loudly.
+	if !updatedUser.ActivationSentAt.Valid {
+		h.logger.Error("resend_activation: activation_sent_at is unexpectedly null after update", "user_id", userID)
+		httputil.InternalError(w)
+		return
 	}
+	sentAt := updatedUser.ActivationSentAt.Time
 
 	// Step 8: Return 200 OK with the new token and URL.
 	// We return 200 (not 201) because we are updating an existing resource,
