@@ -122,16 +122,13 @@ async function handleVerify2fa() {
   error.value = '';
 
   try {
-    await $fetch<{ access_token: string; refresh_token: string }>(
-      '/api/v1/auth/2fa/verify',
-      {
-        method: 'POST',
-        body: { totp_code: totpCode.value },
-        // Send the access token cookie (set during activation) and store
-        // any new cookies from the response.
-        credentials: 'include',
-      },
-    );
+    await $fetch<{ access_token: string; refresh_token: string }>('/api/v1/auth/2fa/verify', {
+      method: 'POST',
+      body: { totp_code: totpCode.value },
+      // Send the access token cookie (set during activation) and store
+      // any new cookies from the response.
+      credentials: 'include',
+    });
 
     // Cookies are set by the API response — no manual token storage needed.
     state.value = 'done';
