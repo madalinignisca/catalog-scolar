@@ -143,6 +143,153 @@ jobs:
         working-directory: web
         run: npm run build
 
+  e2e-test:
+    # ── E2E Test ─────────────────────────────────────────────────────────────
+    # Runs Playwright end-to-end tests against a full live stack:
+    # PostgreSQL + Redis services, the Go API server, and the Nuxt dev server.
+    #
+    # This job only runs after the api-build and web-build jobs succeed, so
+    # lint failures and unit-test failures are caught first (faster feedback).
+    #
+    # The playwright.config.ts has globalSetup disabled when CI=true (it would
+    # drop+recreate the DB while the API server holds live connections).
+    # Instead, we migrate and seed the DB here in the workflow steps.
+    name: E2E Test
+    runs-on: ubuntu-latest
+    needs: [api-build, web-build]
+    services:
+      postgres:
+        # Use the same Postgres version as production to catch any
+        # version-specific SQL behaviour early.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: catalogro
+          POSTGRES_USER: catalogro
+          POSTGRES_PASSWORD: catalogro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      redis:
+        # Redis is used for refresh-token storage and job queues.
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Language runtimes ──────────────────────────────────────────────────
+      # We need both Go (for the API server) and Node (for Playwright + Nuxt).
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: api/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ── Database setup ─────────────────────────────────────────────────────
+      # Generate sqlc code first so that the API server can compile.
+      - name: Generate sqlc code
+        working-directory: api
+        run: go run github.com/sqlc-dev/sqlc/cmd/sqlc generate
+
+      # Apply all goose migrations to create the full database schema.
+      - name: Run migrations
+        working-directory: api
+        run: go run github.com/pressly/goose/v3/cmd/goose -dir db/migrations postgres "postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=disable" up
+
+      # Load seed data: two test schools, users, classes, grades, TOTP secrets.
+      # The seed file path is relative to the monorepo root so psql can find it.
+      - name: Load seed data
+        run: psql "postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=disable" -f api/db/seed.sql
+
+      # ── Start API server (background) ──────────────────────────────────────
+      # The API server is launched in the background so the next steps can run.
+      # JWT_SECRET and TOTP_ENCRYPTION_KEY are CI-only dummy values; they only
+      # need to be non-empty strings — real secrets are never used in CI tests.
+      - name: Start API server
+        working-directory: api
+        env:
+          DATABASE_URL: postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=disable
+          REDIS_URL: redis://localhost:6379/0
+          JWT_SECRET: test-jwt-secret-for-ci-only
+          TOTP_ENCRYPTION_KEY: test-totp-key-for-ci-only
+          APP_BASE_URL: http://localhost:3000
+          PORT: 8080
+          ENV: test
+        run: go run ./cmd/server &
+
+      # ── Install web dependencies ───────────────────────────────────────────
+      # npm ci uses the lockfile to guarantee reproducible installs.
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      # Install only Chromium to keep the job fast. Firefox / WebKit can be
+      # added later if cross-browser coverage is required. --with-deps installs
+      # the OS-level libraries that the headless browser needs.
+      - name: Install Playwright browsers
+        working-directory: web
+        run: npx playwright install chromium --with-deps
+
+      # ── Wait for API server ──────────────────────────────────────────────
+      # Nuxt is started automatically by Playwright's webServer config (CI=true).
+      # We only need to wait for the Go API server to be healthy.
+      - name: Wait for API server
+        run: |
+          for i in $(seq 1 30); do
+            api=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/healthz 2>/dev/null || echo "000")
+            if [ "$api" = "200" ]; then
+              echo "API server ready at attempt $i"
+              exit 0
+            fi
+            echo "Waiting for API... status=$api (attempt $i)"
+            sleep 3
+          done
+          echo "Timeout waiting for API server"
+          exit 1
+
+      # ── Run Playwright E2E tests ───────────────────────────────────────────
+      # CI=true is already set by GitHub Actions, so playwright.config.ts will:
+      #   - Skip globalSetup (DB is already seeded above)
+      #   - Use retries=2 to tolerate transient timing flakes
+      #   - Generate both list output and an HTML report
+      # --reporter=list overrides the config reporter for readable CI log lines.
+      - name: Run Playwright E2E tests
+        # continue-on-error: E2E tests are informational until cookie-based auth
+        # (#35) replaces localStorage tokens. The auth fixture's localStorage
+        # injection is race-prone in CI where SSR cold starts are slower.
+        # Once #35 lands, remove continue-on-error to make failures blocking.
+        continue-on-error: true
+        working-directory: web
+        env:
+          CI: true
+        run: npx playwright test --reporter=list
+
+      # ── Upload test artifacts ──────────────────────────────────────────────
+      # Always upload even if tests fail (if: always()) so that screenshots
+      # and traces captured on failure are available for debugging in the
+      # GitHub Actions UI under the "Artifacts" section of the workflow run.
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: web/test/e2e/results/
+          retention-days: 7
+
   docker:
     name: Docker Build & Push (GHCR)
     runs-on: ubuntu-latest

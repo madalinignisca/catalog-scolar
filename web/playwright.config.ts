@@ -42,8 +42,16 @@ export default defineConfig({
    * globalSetup: runs once before any test.
    * Resets the database (drop + create + migrate + seed) and waits for
    * API + Nuxt servers to be healthy. See test/e2e/global-setup.ts.
+   *
+   * SKIPPED IN CI — the workflow pre-seeds the database via dedicated steps
+   * (goose migrate + psql seed.sql) before starting the API server. Running
+   * globalSetup in CI would drop+recreate the database while the API server
+   * already holds open connections to it, causing the server to crash.
+   * The webServer block (below) starts Nuxt automatically, and the workflow
+   * starts the API server; both health-check waits are handled by the
+   * "Wait for servers" workflow step instead.
    */
-  globalSetup: './test/e2e/global-setup.ts',
+  globalSetup: isCI ? undefined : './test/e2e/global-setup.ts',
 
   /**
    * outputDir: where Playwright writes test artifacts (screenshots, traces, videos).
