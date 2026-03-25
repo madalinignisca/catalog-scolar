@@ -283,10 +283,12 @@ func run() error {
 			// GET /classes — list classes for current school year.
 			// Teachers see only their assigned classes; admins see all.
 			r.Get("/classes", schoolHandler.ListClasses)
-			r.Post("/classes", notImplemented)
+			// POST /classes — create a new class. Restricted to admin role only.
+			r.With(auth.RequireRole("admin")).Post("/classes", schoolHandler.CreateClass)
 			// GET /classes/{classId} — class details with enrolled students.
 			r.Get("/classes/{classId}", schoolHandler.GetClass)
-			r.Put("/classes/{classId}", notImplemented)
+			// PUT /classes/{classId} — update a class. Restricted to admin role only.
+			r.With(auth.RequireRole("admin")).Put("/classes/{classId}", schoolHandler.UpdateClass)
 			r.Post("/classes/{classId}/enroll", notImplemented)
 			r.Delete("/classes/{classId}/enroll/{studentId}", notImplemented)
 			// GET /classes/{classId}/teachers — teacher-subject assignments for a class.

@@ -67,6 +67,35 @@ WHERE teacher_id = $1
     AND class_id = $2
     AND subject_id = $3;
 
+-- name: CreateClass :one
+-- Creates a new class for the current school and the specified school year.
+-- The school_id is set automatically by current_school_id() via RLS context.
+-- $1 = school_year_id (UUID, required)
+-- $2 = name (text, e.g. "5A", required)
+-- $3 = education_level (education_level enum: primary, middle, high)
+-- $4 = grade_number (smallint 1–12, required)
+-- $5 = homeroom_teacher_id (UUID, optional — pass NULL if not yet assigned)
+-- $6 = max_students (smallint, optional — pass NULL to use DB default of 30)
+INSERT INTO classes (school_id, school_year_id, name, education_level, grade_number, homeroom_teacher_id, max_students)
+VALUES (current_school_id(), $1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: UpdateClass :one
+-- Updates mutable fields on a class row. COALESCE keeps the existing value
+-- when the caller passes NULL for a field they do not want to change.
+-- homeroom_teacher_id is NOT wrapped in COALESCE — passing NULL clears the assignment.
+-- $1 = id (UUID of the class to update)
+-- $2 = name (text, nullable — NULL means keep current value)
+-- $3 = homeroom_teacher_id (UUID, nullable — NULL clears the teacher assignment)
+-- $4 = max_students (smallint, nullable — NULL means keep current value)
+UPDATE classes SET
+    name = COALESCE($2, name),
+    homeroom_teacher_id = $3,
+    max_students = COALESCE($4, max_students),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: CreateSubject :one
 -- Creates a new subject for the current school. The school_id is set
 -- automatically by current_school_id() via RLS context.

@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
 	"github.com/vlahsh/catalogro/api/internal/auth"
@@ -529,6 +530,339 @@ func (h *Handler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// POST /classes
+// ──────────────────────────────────────────────────────────────────────────────
+
+// createClassRequest is the JSON body expected by POST /classes.
+// Only admin users may call this endpoint (enforced via RequireRole middleware
+// in main.go — the handler itself does not re-check the role).
+type createClassRequest struct {
+	// SchoolYearID is the UUID of the school year this class belongs to.
+	// Required. The front-end should send the current school year's ID, which
+	// can be obtained via GET /schools/current/year (or the handler can auto-
+	// resolve from GetCurrentSchoolYear if omitted — see Step 2 below).
+	SchoolYearID string `json:"school_year_id"`
+
+	// Name is the class label, e.g. "5A" or "IX B".
+	// Required and must be non-blank (trimmed).
+	Name string `json:"name"`
+
+	// EducationLevel scopes the class to a school level.
+	// Must be one of "primary", "middle", or "high".
+	EducationLevel string `json:"education_level"`
+
+	// GradeNumber is the Romanian clasă/an: 1–4 for primary, 5–8 for middle,
+	// 9–12 for high school.
+	// Required and must be between 1 and 12.
+	GradeNumber int16 `json:"grade_number"`
+
+	// HomeroomTeacherID (diriginte) is optional. Pass null or omit to leave
+	// the homeroom teacher unassigned at creation time.
+	HomeroomTeacherID *string `json:"homeroom_teacher_id"`
+
+	// MaxStudents is the class capacity. Optional — if omitted the database
+	// default of 30 is used.
+	MaxStudents *int16 `json:"max_students"`
+}
+
+// classResponse is the JSON shape returned after creating or updating a class.
+// It mirrors the columns of the classes table but omits school_id (implicit
+// from the JWT/RLS context) and internal audit columns the client does not need.
+type classResponse struct {
+	ID                uuid.UUID  `json:"id"`
+	SchoolYearID      uuid.UUID  `json:"school_year_id"`
+	Name              string     `json:"name"`
+	EducationLevel    string     `json:"education_level"`
+	GradeNumber       int16      `json:"grade_number"`
+	HomeroomTeacherID *uuid.UUID `json:"homeroom_teacher_id"`
+	MaxStudents       *int16     `json:"max_students"`
+}
+
+// CreateClass handles POST /classes.
+//
+// Creates a new class scoped to the current tenant school. The school_id is
+// set automatically by the PostgreSQL function current_school_id() via RLS —
+// the caller does not provide it.
+//
+// This endpoint is restricted to the "admin" role. The RequireRole("admin")
+// middleware applied in main.go enforces this before the handler runs.
+//
+// Request body (JSON):
+//
+//	{
+//	  "school_year_id":      "uuid",     // required
+//	  "name":                "5A",       // required, non-empty
+//	  "education_level":     "middle",   // required: primary | middle | high
+//	  "grade_number":        5,          // required: 1-12
+//	  "homeroom_teacher_id": "uuid",     // optional, null to leave unassigned
+//	  "max_students":        30          // optional, defaults to 30
+//	}
+//
+// Possible responses:
+//   - 201 Created:              { "data": { class fields } }
+//   - 400 Bad Request:         validation failure
+//   - 401 Unauthorized:        auth context missing
+//   - 409 Conflict:            duplicate class name in the same school year
+//   - 500 Internal Server Error: database failure
+func (h *Handler) CreateClass(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify authentication — ensure the auth middleware ran.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries bound to the RLS context.
+	// All SQL executed through this object is automatically filtered to the
+	// current tenant's school_id via PostgreSQL Row-Level Security.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Decode the JSON request body.
+	var req createClassRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Malformed JSON — return a descriptive 400 so the caller can fix their payload.
+		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
+		return
+	}
+
+	// Step 3: Validate required fields.
+
+	// name must be present and non-whitespace.
+	if strings.TrimSpace(req.Name) == "" {
+		httputil.BadRequest(w, "MISSING_FIELD", "name is required and must not be blank")
+		return
+	}
+
+	// education_level must be one of the three allowed enum values.
+	// Validating early gives a friendlier error than a raw DB enum rejection.
+	if !allowedEducationLevels[req.EducationLevel] {
+		httputil.BadRequest(w, "INVALID_EDUCATION_LEVEL",
+			"education_level must be one of: primary, middle, high")
+		return
+	}
+
+	// grade_number must be between 1 and 12 (Romanian school system).
+	// Primary: 1-4 (clasa pregătitoare is grade 0 in some systems, but here 1-4),
+	// Middle: 5-8, High: 9-12.
+	if req.GradeNumber < 1 || req.GradeNumber > 12 {
+		httputil.BadRequest(w, "INVALID_GRADE_NUMBER",
+			"grade_number must be between 1 and 12")
+		return
+	}
+
+	// school_year_id must be a valid UUID.
+	schoolYearID, err := uuid.Parse(req.SchoolYearID)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_SCHOOL_YEAR_ID",
+			"school_year_id must be a valid UUID")
+		return
+	}
+
+	// Step 4: Build the homeroom_teacher_id parameter.
+	// pgtype.UUID is pgx's nullable UUID type. We set Valid=false when the
+	// caller omits the field (null teacher assignment at creation time).
+	var homeroomTeacherID pgtype.UUID
+	if req.HomeroomTeacherID != nil {
+		parsed, err := uuid.Parse(*req.HomeroomTeacherID)
+		if err != nil {
+			httputil.BadRequest(w, "INVALID_TEACHER_ID",
+				"homeroom_teacher_id must be a valid UUID")
+			return
+		}
+		homeroomTeacherID = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
+
+	// Step 5: Insert the class into the database.
+	cls, err := queries.CreateClass(r.Context(), generated.CreateClassParams{
+		SchoolYearID:      schoolYearID,
+		Name:              req.Name,
+		EducationLevel:    generated.EducationLevel(req.EducationLevel),
+		GradeNumber:       req.GradeNumber,
+		HomeroomTeacherID: homeroomTeacherID,
+		MaxStudents:       req.MaxStudents,
+	})
+	if err != nil {
+		// Check for a PostgreSQL unique constraint violation (error code 23505).
+		// The classes table has UNIQUE(school_id, school_year_id, name), so inserting
+		// a class with the same name in the same school year triggers this error.
+		// We return 409 Conflict so the caller knows to use a different name.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			httputil.Error(w, http.StatusConflict, "DUPLICATE_CLASS",
+				"A class with this name already exists for the selected school year")
+			return
+		}
+
+		// Any other DB error is unexpected — log and return generic 500.
+		// Never expose raw database error messages to the caller.
+		h.logger.Error("create_class: database insert failed",
+			"error", err,
+			"name", req.Name,
+			"education_level", req.EducationLevel,
+			"school_year_id", schoolYearID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 6: Return 201 Created with the newly created class in the data envelope.
+	httputil.Created(w, classResponseFromRow(&cls))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PUT /classes/{classId}
+// ──────────────────────────────────────────────────────────────────────────────
+
+// updateClassRequest is the JSON body expected by PUT /classes/{classId}.
+// All fields are optional — omitting a field keeps the current value on the row.
+// Setting homeroom_teacher_id to null explicitly clears the assignment.
+type updateClassRequest struct {
+	// Name is the new class label, e.g. "5B". Optional — omit to keep current name.
+	Name *string `json:"name"`
+
+	// HomeroomTeacherID is the new diriginte UUID. Pass null to unassign the
+	// current teacher. Omitting the field also clears it (JSON null and absent
+	// field both decode to nil *string — callers must always send the value
+	// explicitly if they want to keep the current teacher).
+	HomeroomTeacherID *string `json:"homeroom_teacher_id"`
+
+	// MaxStudents is the new class capacity. Optional — omit to keep current value.
+	MaxStudents *int16 `json:"max_students"`
+}
+
+// UpdateClass handles PUT /classes/{classId}.
+//
+// Updates mutable fields of an existing class. The class must belong to the
+// current tenant (enforced by RLS). The handler reads the current class row
+// first so that fields not included in the request body retain their values.
+//
+// This endpoint is restricted to the "admin" role (enforced in main.go via
+// RequireRole middleware).
+//
+// Request body (JSON) — all fields optional:
+//
+//	{
+//	  "name":                "5B",     // optional — omit to keep current
+//	  "homeroom_teacher_id": "uuid",   // optional — null clears the assignment
+//	  "max_students":        32        // optional — omit to keep current
+//	}
+//
+// Possible responses:
+//   - 200 OK:                  { "data": { updated class fields } }
+//   - 400 Bad Request:         invalid classId format or validation failure
+//   - 401 Unauthorized:        auth context missing
+//   - 404 Not Found:           class does not exist (or belongs to another tenant)
+//   - 500 Internal Server Error: database failure
+func (h *Handler) UpdateClass(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify authentication.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries from context.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Parse the class ID from the URL path.
+	// chi.URLParam extracts the {classId} segment registered in main.go.
+	classIDStr := chi.URLParam(r, "classId")
+	classID, err := uuid.Parse(classIDStr)
+	if err != nil {
+		httputil.BadRequest(w, "INVALID_ID", "classId must be a valid UUID")
+		return
+	}
+
+	// Step 3: Decode the JSON request body.
+	var req updateClassRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
+		return
+	}
+
+	// Step 4: Fetch the current class row so we can apply partial updates.
+	// We need the current name and max_students values for COALESCE-style logic:
+	// if the caller omits a field, we keep the existing value.
+	current, err := queries.GetClassByID(r.Context(), classID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httputil.NotFound(w, "Class not found")
+			return
+		}
+		h.logger.Error("update_class: get current class failed", "error", err, "class_id", classID)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 5: Determine the final values for each mutable field.
+
+	// name: use the requested value if provided, otherwise keep the current name.
+	// The SQL uses COALESCE($2, name), but since the generated param type is
+	// non-nullable string, we resolve the final name here in Go.
+	newName := current.Name
+	if req.Name != nil {
+		if strings.TrimSpace(*req.Name) == "" {
+			httputil.BadRequest(w, "INVALID_FIELD", "name must not be blank if provided")
+			return
+		}
+		newName = *req.Name
+	}
+
+	// homeroom_teacher_id: use the requested value (even if null — null clears it).
+	// If the caller omits the field the JSON decoder sets req.HomeroomTeacherID = nil,
+	// which means "clear the teacher". This matches the spec: the caller must send
+	// the existing teacher ID explicitly to keep it.
+	var newTeacherID pgtype.UUID
+	if req.HomeroomTeacherID != nil {
+		parsed, err := uuid.Parse(*req.HomeroomTeacherID)
+		if err != nil {
+			httputil.BadRequest(w, "INVALID_TEACHER_ID",
+				"homeroom_teacher_id must be a valid UUID")
+			return
+		}
+		newTeacherID = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
+	// If req.HomeroomTeacherID is nil, newTeacherID remains its zero value
+	// (pgtype.UUID{Valid: false}), which the SQL writes as NULL.
+
+	// max_students: COALESCE in SQL handles this — passing nil keeps current value.
+	// The UpdateClassParams already accepts *int16, so we pass req.MaxStudents directly.
+
+	// Step 6: Execute the update.
+	cls, err := queries.UpdateClass(r.Context(), generated.UpdateClassParams{
+		ID:                classID,
+		Name:              newName,
+		HomeroomTeacherID: newTeacherID,
+		MaxStudents:       req.MaxStudents,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Should not happen because we fetched the row in Step 4, but guard
+			// against a race condition where the class was deleted between reads.
+			httputil.NotFound(w, "Class not found")
+			return
+		}
+		h.logger.Error("update_class: database update failed",
+			"error", err,
+			"class_id", classID,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 7: Return 200 OK with the updated class in the data envelope.
+	httputil.Success(w, classResponseFromRow(&cls))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // POST /subjects
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -686,6 +1020,34 @@ func (h *Handler) CreateSubject(w http.ResponseWriter, r *http.Request) {
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
+
+// classResponseFromRow converts a generated.Class database row into the
+// classResponse JSON shape used by both POST /classes and PUT /classes/{classId}.
+//
+// The parameter is passed as a pointer to avoid copying the 160-byte struct on
+// every call (gocritic hugeParam). The caller always has the value on the stack
+// so taking its address is safe and zero-allocation.
+//
+// homeroom_teacher_id is stored in the database as a nullable UUID (pgtype.UUID).
+// We convert it to a *uuid.UUID pointer: non-nil when assigned, nil when unset.
+// This keeps the JSON output clean ("homeroom_teacher_id": null vs. absent key).
+func classResponseFromRow(cls *generated.Class) classResponse {
+	resp := classResponse{
+		ID:             cls.ID,
+		SchoolYearID:   cls.SchoolYearID,
+		Name:           cls.Name,
+		EducationLevel: string(cls.EducationLevel),
+		GradeNumber:    cls.GradeNumber,
+		MaxStudents:    cls.MaxStudents,
+	}
+	// Only set the pointer when the teacher is actually assigned.
+	// pgtype.UUID.Valid is false when the column value is SQL NULL.
+	if cls.HomeroomTeacherID.Valid {
+		id := uuid.UUID(cls.HomeroomTeacherID.Bytes)
+		resp.HomeroomTeacherID = &id
+	}
+	return resp
+}
 
 // ptrOrEmpty safely dereferences a *string pointer.
 // Returns the string value if the pointer is non-nil, or an empty string if nil.
