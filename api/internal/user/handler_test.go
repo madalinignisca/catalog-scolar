@@ -1186,3 +1186,354 @@ func TestListChildren_CorrectClassInfo(t *testing.T) {
 
 	t.Logf("ListChildren (class info): child correctly enrolled in class %s (%s)", gotClassName, gotEduLevel)
 }
+
+// ---------------------------------------------------------------------------
+// Tests for PUT /users/me — UpdateProfile
+// ---------------------------------------------------------------------------
+
+// putJSON builds an *http.Request for PUT /users/me with a JSON body.
+// The body is encoded from the given value. If encoding fails, the test is
+// aborted immediately via t.Fatalf.
+func putJSON(t *testing.T, body any) *http.Request {
+	t.Helper()
+
+	// json.Marshal encodes the Go value to compact JSON bytes.
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("putJSON: marshal body: %v", err)
+	}
+
+	// httptest.NewRequest creates an *http.Request with a valid context.
+	// The target path is "/users/me" — consistent with the route being tested.
+	req := httptest.NewRequest(http.MethodPut, "/users/me", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// ---------------------------------------------------------------------------
+// Test: UpdateProfile — change email (success)
+// ---------------------------------------------------------------------------
+
+// TestUpdateProfile_ChangeEmail verifies the happy path for PUT /users/me
+// when only the email field is updated.
+//
+// Scenario:
+//   - A seeded teacher updates their email to a new address.
+//   - The handler should return HTTP 200 with the updated email in the response.
+//   - The phone field is not sent, so it must remain unchanged.
+//   - Sensitive fields (password_hash, totp_secret) must NOT appear in the response.
+func TestUpdateProfile_ChangeEmail(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up DB with seeded users.
+	// -----------------------------------------------------------------------
+	// StartPostgres starts (or reuses) the shared Postgres 17 container.
+	// TruncateAll ensures no leftover rows from previous tests.
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	// SeedSchools inserts two test schools + school years. We use the first.
+	school1ID, _ := testutil.SeedSchools(t, pool)
+
+	// SeedUsers inserts one user per role. We will update the teacher's profile.
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	teacherID := users1["teacher"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build the PUT /users/me request with only the email field.
+	// -----------------------------------------------------------------------
+	// We send a JSON object with only "email" — phone is intentionally omitted.
+	// The handler should leave the phone value unchanged (COALESCE semantics).
+	newEmail := "teacher.updated@test.catalogro.ro"
+	body := map[string]any{
+		"email": newEmail,
+	}
+	req := putJSON(t, body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject tenant context as the teacher user.
+	// -----------------------------------------------------------------------
+	// withTenantContext sets up the JWT claims with the teacher's UUID so that
+	// auth.GetUserID(ctx) returns teacherID inside the handler. This simulates
+	// the teacher calling PUT /users/me on their own account.
+	req, rollback := withTenantContext(t, pool, req, school1ID, teacherID, "teacher")
+	defer rollback() // always roll back to isolate this test from others
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.UpdateProfile(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	// 200 OK is the correct status for a successful update (not 201 — no new
+	// resource was created; the existing profile was modified).
+	if rr.Code != http.StatusOK {
+		t.Fatalf("UpdateProfile (change email): expected 200, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode the response and assert the email was updated.
+	// -----------------------------------------------------------------------
+	data := decodeData(t, rr)
+
+	// The response must include the new email.
+	gotEmail, _ := data["email"].(string)
+	if gotEmail != newEmail {
+		t.Errorf("UpdateProfile (change email): expected email=%q, got %q", newEmail, gotEmail)
+	}
+
+	// The role must be unchanged (teacher → teacher). This verifies that the
+	// handler does not accidentally reset or change the role field.
+	gotRole, _ := data["role"].(string)
+	if gotRole != "teacher" {
+		t.Errorf("UpdateProfile (change email): expected role='teacher', got %q", gotRole)
+	}
+
+	// Sensitive fields must NOT be present in the response. Leaking these would
+	// be a security vulnerability even for the user's own profile response.
+	rawBody := rr.Body.String()
+	for _, sensitiveField := range []string{"password_hash", "totp_secret", "activation_token"} {
+		if strings.Contains(rawBody, `"`+sensitiveField+`"`) {
+			t.Errorf("UpdateProfile (change email): response must NOT contain %q — body: %s",
+				sensitiveField, rawBody)
+		}
+	}
+
+	t.Logf("UpdateProfile (change email): teacher email updated to %s", newEmail)
+}
+
+// ---------------------------------------------------------------------------
+// Test: UpdateProfile — change phone only (success)
+// ---------------------------------------------------------------------------
+
+// TestUpdateProfile_ChangePhone verifies that PUT /users/me can update only
+// the phone field, leaving the email field unchanged (COALESCE semantics).
+//
+// Scenario:
+//   - A seeded teacher sends only the "phone" field in the request body.
+//   - The response must have the new phone value.
+//   - The email field in the response must match the original seeded email
+//     (i.e., the COALESCE($2, email) in SQL correctly preserved it).
+func TestUpdateProfile_ChangePhone(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up DB.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	teacherID := users1["teacher"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build the PUT /users/me request with only the phone field.
+	// -----------------------------------------------------------------------
+	// The teacher was seeded with email="teacher@test.catalogro.ro" and no phone.
+	// After this update, the phone should be set and the email should remain the same.
+	newPhone := "0741-000-001"
+	body := map[string]any{
+		"phone": newPhone,
+	}
+	req := putJSON(t, body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject tenant context as the teacher.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantContext(t, pool, req, school1ID, teacherID, "teacher")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.UpdateProfile(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusOK {
+		t.Fatalf("UpdateProfile (change phone): expected 200, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode the response and assert phone was updated, email unchanged.
+	// -----------------------------------------------------------------------
+	data := decodeData(t, rr)
+
+	// The phone must be the new value.
+	gotPhone, _ := data["phone"].(string)
+	if gotPhone != newPhone {
+		t.Errorf("UpdateProfile (change phone): expected phone=%q, got %q", newPhone, gotPhone)
+	}
+
+	// The email must remain the original seeded value (not cleared or reset).
+	// SeedUsers creates the teacher with "teacher@test.catalogro.ro".
+	gotEmail, _ := data["email"].(string)
+	originalEmail := "teacher@test.catalogro.ro"
+	if gotEmail != originalEmail {
+		t.Errorf("UpdateProfile (change phone): expected email to remain %q, got %q",
+			originalEmail, gotEmail)
+	}
+
+	t.Logf("UpdateProfile (change phone): phone set to %s, email preserved as %s",
+		gotPhone, gotEmail)
+}
+
+// ---------------------------------------------------------------------------
+// Test: UpdateProfile — empty body keeps current values (no-op)
+// ---------------------------------------------------------------------------
+
+// TestUpdateProfile_EmptyBodyIsNoOp verifies that PUT /users/me with an empty
+// JSON body ({}) returns 200 without changing any user fields.
+//
+// Scenario:
+//   - The teacher sends an empty JSON object: {}.
+//   - The handler should return 200 OK.
+//   - Both email and phone in the response must match the original seeded values.
+//
+// Why this matters: the COALESCE($2, email) SQL pattern means a nil pointer
+// (decoded from a missing JSON field) maps to NULL in PostgreSQL, and NULL
+// coalesces to the existing column value. This test confirms that the Go JSON
+// decoder correctly produces nil pointers for absent fields.
+func TestUpdateProfile_EmptyBodyIsNoOp(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up DB.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	teacherID := users1["teacher"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build the PUT /users/me request with an empty JSON body.
+	// -----------------------------------------------------------------------
+	// An empty JSON object {} decodes into updateProfileRequest{Email: nil, Phone: nil}.
+	// COALESCE(nil, existing_value) = existing_value → no change.
+	body := map[string]any{}
+	req := putJSON(t, body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject tenant context as the teacher.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantContext(t, pool, req, school1ID, teacherID, "teacher")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.UpdateProfile(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	// Even a no-op update should succeed — the handler does not reject empty bodies.
+	// This is correct REST behaviour: the client may want to "touch" updated_at
+	// or simply confirm the current values.
+	if rr.Code != http.StatusOK {
+		t.Fatalf("UpdateProfile (empty body): expected 200, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Decode the response and assert no fields were changed.
+	// -----------------------------------------------------------------------
+	data := decodeData(t, rr)
+
+	// Email must still be the original seeded value.
+	gotEmail, _ := data["email"].(string)
+	if gotEmail != "teacher@test.catalogro.ro" {
+		t.Errorf("UpdateProfile (empty body): expected email to be unchanged (%q), got %q",
+			"teacher@test.catalogro.ro", gotEmail)
+	}
+
+	// Phone was not seeded (nullable) — either absent from the response map
+	// (omitempty) or empty string. Both are acceptable: we just confirm it is not
+	// an unexpected non-empty value.
+	gotPhone, _ := data["phone"].(string)
+	if gotPhone != "" {
+		t.Errorf("UpdateProfile (empty body): expected phone to be empty (not seeded), got %q",
+			gotPhone)
+	}
+
+	t.Logf("UpdateProfile (empty body): all fields unchanged — email=%s", gotEmail)
+}
+
+// ---------------------------------------------------------------------------
+// Test: UpdateProfile — invalid email format returns 400
+// ---------------------------------------------------------------------------
+
+// TestUpdateProfile_InvalidEmail verifies that PUT /users/me returns HTTP 400
+// when the provided email does not contain an "@" character.
+//
+// Scenario:
+//   - The teacher sends email="notavalidemailaddress" (no "@").
+//   - The handler should return 400 Bad Request with error code "INVALID_EMAIL".
+//
+// Why we validate the email:
+// The DB will happily store any string in the email column (it has no format
+// constraint). A basic client-side-style check prevents accidental nonsense
+// values from being persisted and avoids confusing users on reactivation flows.
+func TestUpdateProfile_InvalidEmail(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up DB.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users1 := testutil.SeedUsers(t, pool, school1ID)
+	teacherID := users1["teacher"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build the PUT /users/me request with an invalid email.
+	// -----------------------------------------------------------------------
+	// "notanemailaddress" does not contain "@", which is our validation criterion.
+	// The handler must reject this with 400 and NOT call the DB.
+	body := map[string]any{
+		"email": "notanemailaddress",
+	}
+	req := putJSON(t, body)
+
+	// -----------------------------------------------------------------------
+	// 3. Inject tenant context as the teacher.
+	// -----------------------------------------------------------------------
+	req, rollback := withTenantContext(t, pool, req, school1ID, teacherID, "teacher")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildHandler(pool)
+	h.UpdateProfile(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 400 Bad Request.
+	// -----------------------------------------------------------------------
+	// The handler must reject the invalid email and NOT call UpdateUserProfile.
+	// Returning 200 here would be a bug — the invalid string would be persisted.
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateProfile (invalid email): expected 400, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 6. Verify the error code in the response body.
+	// -----------------------------------------------------------------------
+	// The error envelope must have code="INVALID_EMAIL" so the frontend can
+	// display a user-friendly validation message without parsing the message text.
+	code, msg := decodeError(t, rr)
+	if code != "INVALID_EMAIL" {
+		t.Errorf("UpdateProfile (invalid email): expected error code 'INVALID_EMAIL', got %q (message: %q)",
+			code, msg)
+	}
+
+	t.Logf("UpdateProfile (invalid email): correctly rejected with code=%s msg=%s", code, msg)
+}
