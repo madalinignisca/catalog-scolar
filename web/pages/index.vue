@@ -24,6 +24,7 @@
 
 <script setup lang="ts">
 import type { TeacherClass } from '~/composables/useCatalog';
+import { api } from '~/lib/api';
 
 /**
  * Get the current user from the auth composable.
@@ -45,6 +46,80 @@ const { classes, fetchClasses, isLoading, error } = useCatalog();
  * This prevents the "flash of fallback content" before fetchProfile completes.
  */
 const pageLoading = ref(true);
+
+/**
+ * Represents a single child linked to a parent account.
+ * Fields are camelCase after the snakeToCamel conversion in api().
+ *
+ * Mirrors the API response from GET /users/me/children:
+ *   id                  — UUID of the child's user record
+ *   firstName           — Child's given name
+ *   lastName            — Child's family name
+ *   email               — Child's school email address
+ *   role                — Always "student" for linked children
+ *   classId             — UUID of the class the child is enrolled in
+ *   className           — Human-readable class name (e.g. "2A")
+ *   classEducationLevel — "primary" | "middle" | "high"
+ */
+interface Child {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  classId: string;
+  className: string;
+  classEducationLevel: string;
+}
+
+/**
+ * Reactive list of children linked to the currently logged-in parent.
+ * Populated by fetchChildren() during onMounted. Empty array before fetch.
+ */
+const children = ref<Child[]>([]);
+
+/**
+ * Loading flag for the children fetch.
+ * True while the GET /users/me/children request is in-flight.
+ * Drives the skeleton loading state in the parent dashboard template.
+ */
+const childrenLoading = ref(false);
+
+/**
+ * Error message from the children fetch, or null if the request succeeded.
+ * Shown as a red error banner in the parent dashboard template.
+ */
+const childrenError = ref<string | null>(null);
+
+/**
+ * Fetches the list of children linked to the logged-in parent account.
+ *
+ * Calls GET /api/v1/users/me/children. The api() wrapper:
+ *   1. Attaches the JWT access token from localStorage
+ *   2. Unwraps the { "data": [...] } envelope
+ *   3. Converts snake_case keys to camelCase (first_name → firstName, etc.)
+ *
+ * Sets `childrenLoading` to true while the request is in-flight so the
+ * template can show a skeleton placeholder instead of an empty screen.
+ * On success, `children` is populated. On failure, `childrenError` is set.
+ */
+async function fetchChildren(): Promise<void> {
+  childrenLoading.value = true;
+  childrenError.value = null;
+  try {
+    // The endpoint returns an array of child user objects wrapped in { data: [...] }.
+    // api<Child[]>() handles the envelope unwrap and camelCase conversion for us.
+    children.value = await api<Child[]>('/users/me/children');
+  } catch (err: unknown) {
+    // Surface a human-readable message in the template error banner.
+    // If the error is an Error instance, use its message; otherwise use a generic fallback.
+    childrenError.value = err instanceof Error ? err.message : 'Eroare la încărcarea datelor.';
+  } finally {
+    // Always clear the loading state, even if the request failed,
+    // so the spinner does not spin forever on network errors.
+    childrenLoading.value = false;
+  }
+}
 
 /**
  * On mount: check authentication and load data.
@@ -74,13 +149,25 @@ onMounted(async () => {
     await fetchClasses();
   }
 
+  // If the user is a parent, fetch their linked children for the dashboard.
+  // This call is intentionally NOT awaited before setting pageLoading = false
+  // so the page skeleton appears immediately and children load in the background.
+  if (user.value?.role === 'parent') {
+    void fetchChildren();
+  }
+
   // Page is ready — show the role-based content
   pageLoading.value = false;
 });
 
 /**
  * Map education levels to human-readable Romanian labels.
- * Used to display on the class cards so teachers know the grading system.
+ * Used on class cards (teacher view) and child cards (parent view) so
+ * users always see a descriptive label instead of a raw enum value.
+ *
+ * primary → "Primar (P-IV)"   — classes P through IV, qualifier-based grading
+ * middle  → "Gimnaziu (V-VIII)" — classes V-VIII, numeric grades 1–10
+ * high    → "Liceu (IX-XII)"    — classes IX-XII, same rules as middle school
  */
 const educationLevelLabels: Record<string, string> = {
   primary: 'Primar (P-IV)',
@@ -285,14 +372,112 @@ function openClass(classItem: TeacherClass): void {
   </div>
 
   <!-- ================================================================== -->
-  <!-- PARENT DASHBOARD (placeholder for future implementation)           -->
+  <!-- PARENT DASHBOARD                                                   -->
+  <!-- Shows a grid of child cards when the user is a parent.            -->
+  <!-- Each card displays the child's name, class, and education level.  -->
   <!-- ================================================================== -->
   <div data-testid="dashboard-content" v-else-if="user?.role === 'parent'" class="space-y-6">
+    <!-- Page heading -->
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Copiii mei</h1>
       <p class="mt-1 text-sm text-gray-500">Vizualizați situația școlară a copiilor</p>
     </div>
-    <p class="text-gray-500">Încărcare date...</p>
+
+    <!-- Error banner: shown if the children list failed to load -->
+    <div
+      v-if="childrenError !== null"
+      class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+    >
+      {{ childrenError }}
+    </div>
+
+    <!-- Loading state: skeleton cards while fetching children from the API -->
+    <div v-if="childrenLoading" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <!--
+        Three placeholder skeleton cards are shown while the API call is in-flight.
+        The animate-pulse class makes them fade in and out to indicate activity.
+        The gray boxes represent the child name, class name, and badge areas.
+      -->
+      <div
+        v-for="n in 3"
+        :key="n"
+        class="animate-pulse rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+      >
+        <div class="mb-3 h-5 w-36 rounded bg-gray-200" />
+        <div class="flex items-center gap-2">
+          <div class="h-4 w-20 rounded bg-gray-100" />
+          <div class="h-4 w-24 rounded bg-gray-100" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state: parent has no children linked to their account yet -->
+    <div
+      v-else-if="children.length === 0 && childrenError === null"
+      class="rounded-xl border-2 border-dashed border-gray-300 p-12 text-center"
+    >
+      <!--
+        This state appears when the parent account exists but no student accounts
+        have been linked to it yet. The secretary must perform the linkage
+        via the admin user-provisioning flow.
+      -->
+      <svg
+        class="mx-auto h-12 w-12 text-gray-400"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        stroke-width="1"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+        />
+      </svg>
+      <h3 class="mt-4 text-sm font-semibold text-gray-900">Niciun copil asociat</h3>
+      <p class="mt-1 text-sm text-gray-500">
+        Contactați secretariatul școlii pentru a asocia contul copilului.
+      </p>
+    </div>
+
+    <!-- Child cards grid: one card per linked child -->
+    <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <!--
+        Each card shows a single linked child. The data-testid="child-card"
+        attribute is required by the E2E test suite (parent.spec.ts, test 26)
+        to locate and assert on individual child cards.
+      -->
+      <div
+        data-testid="child-card"
+        v-for="child in children"
+        :key="child.id"
+        class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+      >
+        <!-- Child's full name: last name first, matching Romanian convention -->
+        <h3 class="text-lg font-semibold text-gray-900">
+          {{ child.firstName }} {{ child.lastName }}
+        </h3>
+
+        <!-- Class name and education level badge -->
+        <div class="mt-2 flex items-center gap-2">
+          <!--
+            Class name: e.g. "Clasa 2A".
+            The "Clasa" prefix is added here (not stored in the API) to make
+            the label read naturally in Romanian (e.g. "Clasa 2A").
+          -->
+          <span class="text-sm text-gray-500">Clasa {{ child.className }}</span>
+
+          <!--
+            Education level badge: maps the raw enum value ("primary", "middle",
+            "high") to a human-readable Romanian label using educationLevelLabels.
+            Falls back to the raw value if an unknown level is returned.
+          -->
+          <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+            {{ educationLevelLabels[child.classEducationLevel] ?? child.classEducationLevel }}
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ================================================================== -->
