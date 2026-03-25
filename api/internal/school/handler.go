@@ -8,6 +8,7 @@
 //	GET  /classes/{classId}             — class details with enrolled students
 //	GET  /classes/{classId}/teachers    — teacher assignments for a class
 //	GET  /subjects                      — list subjects
+//	POST /subjects                      — create a new subject (admin only)
 //
 // All endpoints require authentication. The user's school_id (tenant) is read
 // from the request context, which was set by the auth/tenant middleware. The
@@ -16,9 +17,11 @@
 package school
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -522,6 +525,160 @@ func (h *Handler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.List(w, items, nil)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /subjects
+// ──────────────────────────────────────────────────────────────────────────────
+
+// createSubjectRequest is the JSON body expected by POST /subjects.
+// Only admin users may call this endpoint (enforced via RequireRole middleware
+// in main.go — the handler itself does not re-check the role).
+type createSubjectRequest struct {
+	// Name is the full subject name in Romanian, e.g. "Matematică".
+	// Required — the request is rejected with 400 if this is missing or blank.
+	Name string `json:"name"`
+
+	// ShortName is the abbreviated subject code, e.g. "MAT".
+	// Optional — if omitted the database stores NULL.
+	ShortName *string `json:"short_name"`
+
+	// EducationLevel scopes the subject to a school level.
+	// Must be one of "primary", "middle", or "high".
+	EducationLevel string `json:"education_level"`
+
+	// HasThesis indicates whether a semester thesis (teză) is recorded for
+	// this subject. Defaults to false when not supplied in the request body.
+	HasThesis bool `json:"has_thesis"`
+}
+
+// allowedEducationLevels is the set of valid values for the education_level field.
+// It mirrors the PostgreSQL education_level enum defined in the schema.
+var allowedEducationLevels = map[string]bool{
+	"primary": true,
+	"middle":  true,
+	"high":    true,
+}
+
+// CreateSubject handles POST /subjects.
+//
+// Creates a new subject scoped to the current tenant school. The school_id is
+// set automatically by the PostgreSQL function current_school_id() via RLS —
+// the caller does not provide it.
+//
+// This endpoint is restricted to the "admin" role. The RequireRole("admin")
+// middleware applied in main.go enforces this before the handler runs.
+//
+// Request body (JSON):
+//
+//	{
+//	  "name":            "Matematică",   // required, non-empty
+//	  "short_name":      "MAT",          // optional
+//	  "education_level": "middle",       // required: primary | middle | high
+//	  "has_thesis":      true            // optional, defaults to false
+//	}
+//
+// Possible responses:
+//   - 201 Created:              { "data": { subject fields } }
+//   - 400 Bad Request:         validation failure (missing name, invalid level)
+//   - 401 Unauthorized:        auth context missing
+//   - 409 Conflict:            duplicate name+education_level for this school
+//   - 500 Internal Server Error: database failure
+func (h *Handler) CreateSubject(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify authentication — ensure the auth middleware ran.
+	// GetSchoolID reads the school UUID from JWT claims in the request context.
+	// If it is absent, the middleware chain was misconfigured.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries bound to the RLS context.
+	// All SQL executed through this object is automatically filtered to the
+	// current tenant's school_id via PostgreSQL Row-Level Security.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Decode the JSON request body into our request struct.
+	// json.NewDecoder streams the body — more efficient than ioutil.ReadAll for
+	// potentially large payloads (though subject payloads are always tiny).
+	var req createSubjectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Malformed JSON (e.g. missing closing brace, wrong value type).
+		// Return a descriptive 400 so the caller knows to fix their payload.
+		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
+		return
+	}
+
+	// Step 3: Validate required fields.
+
+	// name must be present and non-whitespace.
+	// strings.TrimSpace catches payloads like {"name": "   "} which would
+	// create an empty-looking subject row — a common junior mistake.
+	if strings.TrimSpace(req.Name) == "" {
+		httputil.BadRequest(w, "MISSING_FIELD", "name is required and must not be blank")
+		return
+	}
+
+	// education_level must be one of the three allowed enum values.
+	// The PostgreSQL enum would also enforce this, but validating early gives
+	// a friendlier error message instead of a raw DB error string.
+	if !allowedEducationLevels[req.EducationLevel] {
+		httputil.BadRequest(w, "INVALID_EDUCATION_LEVEL",
+			"education_level must be one of: primary, middle, high")
+		return
+	}
+
+	// Step 4: Insert the subject into the database.
+	// generated.EducationLevel is the Go type that maps to the PostgreSQL enum.
+	// Casting req.EducationLevel (a plain string) to this type is safe here
+	// because we already validated it against allowedEducationLevels above.
+	subject, err := queries.CreateSubject(r.Context(), generated.CreateSubjectParams{
+		Name:           req.Name,
+		ShortName:      req.ShortName,
+		EducationLevel: generated.EducationLevel(req.EducationLevel),
+		HasThesis:      req.HasThesis,
+	})
+	if err != nil {
+		// Check for a PostgreSQL unique constraint violation (error code 23505).
+		// This happens when the school already has a subject with the same name
+		// at the same education level. We return 409 Conflict rather than 500
+		// so the caller can display a meaningful message ("subject already exists").
+		//
+		// pgconn.PgError is the pgx type that wraps PostgreSQL error codes.
+		// We use errors.As (not a type switch) because pgx may wrap the error.
+		var pgErr interface{ SQLState() string }
+		if errors.As(err, &pgErr) && pgErr.SQLState() == "23505" {
+			httputil.Error(w, http.StatusConflict, "DUPLICATE_SUBJECT",
+				"A subject with this name already exists for the selected education level")
+			return
+		}
+
+		// Any other DB error is unexpected — log it and return a generic 500.
+		// Never expose raw database error messages to the caller (security/info-leak).
+		h.logger.Error("create_subject: database insert failed",
+			"error", err,
+			"name", req.Name,
+			"education_level", req.EducationLevel,
+		)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 5: Return 201 Created with the newly created subject in the data envelope.
+	// We reuse subjectResponse (the same struct used by ListSubjects) so the
+	// shape is consistent between GET /subjects and POST /subjects.
+	httputil.Created(w, subjectResponse{
+		ID:             subject.ID,
+		Name:           subject.Name,
+		ShortName:      subject.ShortName,
+		EducationLevel: string(subject.EducationLevel),
+		HasThesis:      subject.HasThesis,
+	})
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

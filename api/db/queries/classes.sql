@@ -67,6 +67,17 @@ WHERE teacher_id = $1
     AND class_id = $2
     AND subject_id = $3;
 
+-- name: CreateSubject :one
+-- Creates a new subject for the current school. The school_id is set
+-- automatically by current_school_id() via RLS context.
+-- $1 = name (text, required)
+-- $2 = short_name (text, optional — pass NULL if not provided)
+-- $3 = education_level (education_level enum: primary, middle, high)
+-- $4 = has_thesis (boolean, defaults to false if not provided by the caller)
+INSERT INTO subjects (school_id, name, short_name, education_level, has_thesis)
+VALUES (current_school_id(), $1, $2, $3, $4)
+RETURNING *;
+
 -- name: ListSubjectsBySchool :many
 -- Returns all active subjects for the current tenant school.
 -- Used by the /subjects endpoint.

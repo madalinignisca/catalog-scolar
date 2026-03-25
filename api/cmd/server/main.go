@@ -296,7 +296,9 @@ func run() error {
 			// Subjects
 			// GET /subjects — list all active subjects for the school.
 			r.Get("/subjects", schoolHandler.ListSubjects)
-			r.Post("/subjects", notImplemented)
+			// POST /subjects — create a new subject. Restricted to admin role only.
+			// Teachers, secretaries, parents, and students must receive 403 Forbidden.
+			r.With(auth.RequireRole("admin")).Post("/subjects", schoolHandler.CreateSubject)
 
 			// Catalog (grades)
 			// GET — list grades for a class/subject/semester with student grouping.
