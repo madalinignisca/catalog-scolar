@@ -29,16 +29,25 @@ import (
 // Helper: deterministic UUID generator
 // ---------------------------------------------------------------------------
 
-// deterministicID produces a deterministic V5 UUID by hashing the given name
+// DeterministicID produces a deterministic V5 UUID by hashing the given name
 // under the URL namespace. The same name always yields the same UUID, making
 // test data reproducible across runs.
 //
+// Exported so that test files in other packages can generate IDs that match
+// the ones created by seed helpers (e.g., "school-year-1" for the first school year).
+//
 // Example:
 //
-//	deterministicID("school-1") → always the same UUID
-//	deterministicID("school-2") → a different UUID, but also always the same
-func deterministicID(name string) uuid.UUID {
+//	DeterministicID("school-1") → always the same UUID
+//	DeterministicID("school-2") → a different UUID, but also always the same
+func DeterministicID(name string) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-"+name))
+}
+
+// deterministicID is the package-internal alias for DeterministicID.
+// Kept for backwards compatibility with existing seed code.
+func deterministicID(name string) uuid.UUID {
+	return DeterministicID(name)
 }
 
 // ---------------------------------------------------------------------------
@@ -441,4 +450,144 @@ func SeedClass(t *testing.T, pool *pgxpool.Pool, schoolID, teacherID uuid.UUID) 
 	}
 
 	return classID
+}
+
+// ---------------------------------------------------------------------------
+// SeedPrimaryClass
+// ---------------------------------------------------------------------------
+
+// PrimaryClassResult holds the IDs created by SeedPrimaryClass so that tests
+// can reference the exact entities (class, subject, students, teacher assignment).
+type PrimaryClassResult struct {
+	ClassID    uuid.UUID
+	SubjectID  uuid.UUID
+	StudentID  uuid.UUID // First student (from SeedUsers).
+	Student2ID uuid.UUID // Second student (created by SeedPrimaryClass).
+}
+
+// SeedPrimaryClass creates a primary-education class (grade 2, "2A") with a
+// subject ("Comunicare în limba română", CLR) and enrolls the test student.
+// The teacher is assigned to teach CLR in this class.
+//
+// This is specifically designed for testing descriptive evaluations, which
+// are only used in primary school (classes P-IV) in the Romanian system.
+//
+// Prerequisites: SeedSchools and SeedUsers must have been called first for the
+// same schoolID. The teacherID must be a valid user created by SeedUsers.
+//
+// Returns a PrimaryClassResult with the IDs of all created entities.
+func SeedPrimaryClass(t *testing.T, pool *pgxpool.Pool, schoolID, teacherID uuid.UUID) PrimaryClassResult {
+	t.Helper()
+
+	ctx := context.Background()
+
+	// --- Generate deterministic UUIDs for primary class entities.
+	// We use a "primary-" prefix to avoid collision with SeedClass which uses
+	// a generic "class-" prefix.
+	suffix := schoolID.String()[:8]
+	classID := deterministicID("primary-class-" + suffix)
+	subjectID := deterministicID("primary-subject-" + suffix)
+	enrollmentID := deterministicID("primary-enrollment-" + suffix)
+	assignmentID := deterministicID("primary-assignment-" + suffix)
+	student2ID := deterministicID("primary-student2-" + suffix)
+	enrollment2ID := deterministicID("primary-enrollment2-" + suffix)
+
+	// The school year ID must match the one created by SeedSchools.
+	schoolYearID := deterministicID("school-year-1")
+	school1ID := deterministicID("school-1")
+	if schoolID != school1ID {
+		schoolYearID = deterministicID("school-year-2")
+	}
+
+	// Reuse the first student ID from SeedUsers.
+	studentID := deterministicID("student-" + suffix)
+
+	// --- Acquire a dedicated connection and set tenant context.
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: acquire connection: %v", err)
+	}
+	defer conn.Release()
+
+	SetTenantOnConn(t, conn, schoolID)
+
+	// ---------------------------------------------------------------
+	// 1. Insert the primary class (grade 2, "2A").
+	// ---------------------------------------------------------------
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO classes (id, school_id, school_year_id, name, education_level,
+			grade_number, homeroom_teacher_id)
+		VALUES ($1, $2, $3, $4, $5::education_level, $6, $7)
+		ON CONFLICT (id) DO NOTHING`,
+		classID, schoolID, schoolYearID, "2A", "primary", 2, teacherID)
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: insert class: %v", err)
+	}
+
+	// ---------------------------------------------------------------
+	// 2. Insert a primary-level subject.
+	// ---------------------------------------------------------------
+	// "Comunicare în limba română" (CLR) is the primary-level Romanian language subject.
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO subjects (id, school_id, name, short_name, education_level, has_thesis)
+		VALUES ($1, $2, $3, $4, $5::education_level, $6)
+		ON CONFLICT (id) DO NOTHING`,
+		subjectID, schoolID, "Comunicare în limba română", "CLR", "primary", false)
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: insert subject: %v", err)
+	}
+
+	// ---------------------------------------------------------------
+	// 3. Enroll the student in the class.
+	// ---------------------------------------------------------------
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO class_enrollments (id, school_id, class_id, student_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO NOTHING`,
+		enrollmentID, schoolID, classID, studentID)
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: insert enrollment: %v", err)
+	}
+
+	// ---------------------------------------------------------------
+	// 3b. Create a second student and enroll them in the class.
+	// ---------------------------------------------------------------
+	// This enables tests to verify that ListEvaluations returns ALL students,
+	// including those without an evaluation (evaluation: null).
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO users (id, school_id, role, first_name, last_name, is_active)
+		VALUES ($1, $2, 'student'::user_role, $3, $4, true)
+		ON CONFLICT (id) DO NOTHING`,
+		student2ID, schoolID, "Maria", "Ionescu")
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: insert student2: %v", err)
+	}
+
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO class_enrollments (id, school_id, class_id, student_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO NOTHING`,
+		enrollment2ID, schoolID, classID, student2ID)
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: insert enrollment2: %v", err)
+	}
+
+	// ---------------------------------------------------------------
+	// 4. Assign the teacher to teach CLR in class 2A.
+	// ---------------------------------------------------------------
+	_, err = conn.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`INSERT INTO class_subject_teachers (id, school_id, class_id, subject_id, teacher_id)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO NOTHING`,
+		assignmentID, schoolID, classID, subjectID, teacherID)
+	if err != nil {
+		t.Fatalf("SeedPrimaryClass: insert teacher assignment: %v", err)
+	}
+
+	return PrimaryClassResult{
+		ClassID:    classID,
+		SubjectID:  subjectID,
+		StudentID:  studentID,
+		Student2ID: student2ID,
+	}
 }
