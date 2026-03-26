@@ -33,6 +33,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/catalog"
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
+	"github.com/vlahsh/catalogro/api/internal/interop"
 	"github.com/vlahsh/catalogro/api/internal/report"
 	"github.com/vlahsh/catalogro/api/internal/school"
 	"github.com/vlahsh/catalogro/api/internal/user"
@@ -109,6 +110,9 @@ func run() error {
 
 	// reportHandler manages reports: dashboard stats, student report cards, class statistics.
 	reportHandler := report.NewHandler(queries, logger)
+
+	// interopHandler manages SIIIR import/export and source mappings.
+	interopHandler := interop.NewHandler(queries, logger)
 
 	// userHandler manages user provisioning: creating accounts, listing users,
 	// and listing accounts awaiting activation. Restricted to admin and secretary
@@ -393,14 +397,21 @@ func run() error {
 			r.Get("/reports/jobs/{jobId}", notImplemented)
 			r.Post("/reports/isj-export", notImplemented)
 
-			// Interoperability (import/export)
-			r.Post("/interop/import", notImplemented)                    // upload CSV, auto-detect format
-			r.Post("/interop/import/{importId}/confirm", notImplemented) // confirm after preview
-			r.Get("/interop/import/{importId}/status", notImplemented)
-			r.Post("/interop/export/siiir", notImplemented)                   // export SIIIR format for ISJ
-			r.Post("/interop/portability/export/{studentId}", notImplemented) // student record package (EHEIF)
-			r.Post("/interop/portability/import", notImplemented)             // import transferred student
-			r.Get("/interop/source-mappings", notImplemented)                 // list entity <-> external ID mappings
+			// Interoperability — SIIIR import/export
+			// POST — upload SIIIR CSV, auto-detect format, return preview.
+			r.Post("/interop/import", interopHandler.Import)
+			// POST — confirm and persist a previewed import.
+			r.Post("/interop/import/{importId}/confirm", interopHandler.ConfirmImport)
+			// GET — check import session status.
+			r.Get("/interop/import/{importId}/status", interopHandler.ImportStatus)
+			// POST — export students as SIIIR-compatible CSV.
+			r.Post("/interop/export/siiir", interopHandler.ExportSIIIR)
+			// GET — list source mappings (SIIIR ↔ internal entity IDs).
+			r.Get("/interop/source-mappings", interopHandler.ListSourceMappings)
+
+			// Interoperability — student portability (EHEIF, not yet implemented)
+			r.Post("/interop/portability/export/{studentId}", notImplemented)
+			r.Post("/interop/portability/import", notImplemented)
 		})
 
 		// =====================================================================
