@@ -297,7 +297,11 @@ func run() error {
 			// GET /schools/current — returns the current tenant's school details.
 			r.Get("/schools/current", schoolHandler.GetCurrentSchool)
 			r.Put("/schools/current", notImplemented)
-			r.Get("/schools/current/year", notImplemented)
+			// GET /schools/current/year — returns the active school year with
+			// semester date boundaries. Accessible to all authenticated users
+			// (teachers, admins, secretaries, parents, students) because every
+			// role needs the school year context to display dates correctly.
+			r.Get("/schools/current/year", schoolHandler.GetCurrentYear)
 
 			// Classes
 			// GET /classes — list classes for current school year.
