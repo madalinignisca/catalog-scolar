@@ -58,25 +58,22 @@ import (
 func JWTAuth(secret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Step 1: Get the Authorization header.
-			// Expected format: "Bearer eyJhbGciOiJIUzI1NiIs..."
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing Authorization header")
+			// Step 1: Extract the JWT access token from the request.
+			// We check two sources in order of priority:
+			//   1. httpOnly cookie "catalogro_access_token" — used by browsers
+			//      and Nuxt SSR (cookies are sent automatically with every request)
+			//   2. Authorization: Bearer <token> header — used by non-browser API
+			//      clients (mobile apps, CLI tools, Postman, etc.)
+			//
+			// Cookie-first is intentional: SSR requests include cookies but not
+			// the Authorization header (which was set by client-side JS).
+			tokenString := getTokenFromRequest(r)
+			if tokenString == "" {
+				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required — no token found in cookie or Authorization header")
 				return
 			}
 
-			// Step 2: Split "Bearer" from the actual token.
-			// We expect exactly two parts: ["Bearer", "<token>"].
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization header must be: Bearer <token>")
-				return
-			}
-
-			tokenString := parts[1]
-
-			// Step 3: Validate the token — check signature, expiry, and claims structure.
+			// Step 2: Validate the token — check signature, expiry, and claims structure.
 			claims, err := ValidateToken(tokenString, secret)
 			if err != nil {
 				// Log the actual error for debugging, but don't expose details to the client
@@ -86,13 +83,39 @@ func JWTAuth(secret []byte) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Step 4: Store claims in context so handlers can access user info.
+			// Step 3: Store claims in context so handlers can access user info.
 			// This is how GetClaims(ctx), GetUserID(ctx), and GetSchoolID(ctx) work.
 			// The claimsKey constant is defined in context.go (same package).
 			ctx := context.WithValue(r.Context(), claimsKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// getTokenFromRequest extracts the JWT access token from the request, checking
+// the httpOnly cookie first and falling back to the Authorization header.
+//
+// Priority order:
+//  1. Cookie "catalogro_access_token" — browsers send this automatically,
+//     including during Nuxt SSR where localStorage is unavailable.
+//  2. Authorization: Bearer <token> — API clients (mobile, CLI, Postman)
+//     that don't use cookies can still authenticate via the header.
+//
+// Returns an empty string if no token is found in either location.
+func getTokenFromRequest(r *http.Request) string {
+	// Try cookie first — this is how browser clients (and SSR) send the token.
+	if cookie, err := r.Cookie("catalogro_access_token"); err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+
+	// Fall back to the Authorization header for non-browser API clients.
+	// RFC 7235: auth scheme names are case-insensitive ("bearer", "Bearer", "BEARER").
+	authHeader := r.Header.Get("Authorization")
+	if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+		return strings.TrimSpace(authHeader[7:])
+	}
+
+	return ""
 }
 
 // =============================================================================
