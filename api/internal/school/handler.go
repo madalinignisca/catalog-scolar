@@ -4,6 +4,7 @@
 // These handlers cover the "School config" and "Classes" sections of the API:
 //
 //	GET  /schools/current               — current school info
+//	GET  /schools/current/year          — current school year with semester dates
 //	GET  /classes                       — list classes for current school year
 //	GET  /classes/{classId}             — class details with enrolled students
 //	GET  /classes/{classId}/teachers    — teacher assignments for a class
@@ -145,6 +146,148 @@ func (h *Handler) GetCurrentSchool(w http.ResponseWriter, r *http.Request) {
 		Email:           school.Email,
 		IsActive:        school.IsActive,
 	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /schools/current/year
+// ──────────────────────────────────────────────────────────────────────────────
+
+// schoolYearResponse is the JSON shape returned by GET /schools/current/year.
+//
+// We define a dedicated response struct (instead of returning the raw DB model)
+// for two reasons:
+//  1. We can rename or omit fields without touching the database schema.
+//  2. pgtype.Date must be converted to a plain string so that JSON clients
+//     receive "2026-09-14" instead of a pgtype-specific struct.
+//
+// All date fields use the ISO 8601 / "YYYY-MM-DD" format expected by the
+// Romanian education calendar (starts mid-September, ends mid-June).
+type schoolYearResponse struct {
+	// ID is the school year's primary key UUID.
+	ID string `json:"id"`
+
+	// Label is the human-readable school year name, e.g. "2026-2027".
+	Label string `json:"label"`
+
+	// StartDate is the first day of the school year (ISO 8601).
+	StartDate string `json:"start_date"`
+
+	// EndDate is the last day of the school year (ISO 8601).
+	EndDate string `json:"end_date"`
+
+	// Sem1Start is the first day of the first semester (ISO 8601).
+	Sem1Start string `json:"sem1_start"`
+
+	// Sem1End is the last day of the first semester (ISO 8601).
+	Sem1End string `json:"sem1_end"`
+
+	// Sem2Start is the first day of the second semester (ISO 8601).
+	Sem2Start string `json:"sem2_start"`
+
+	// Sem2End is the last day of the second semester (ISO 8601).
+	Sem2End string `json:"sem2_end"`
+
+	// IsCurrent flags this as the active school year for the school.
+	// There can only be one current year per school (enforced by a partial
+	// unique index in PostgreSQL).
+	IsCurrent bool `json:"is_current"`
+}
+
+// GetCurrentYear handles GET /schools/current/year.
+//
+// Returns the school year that is currently marked as active (is_current = true)
+// for the authenticated user's school. The query is tenant-scoped via RLS —
+// no school_id parameter is needed in the URL.
+//
+// Possible responses:
+//   - 200 OK:                    { "data": { school year fields } }
+//   - 401 Unauthorized:          auth context missing (JWT not provided)
+//   - 404 Not Found:             no school year is currently marked as current
+//   - 500 Internal Server Error: database failure
+func (h *Handler) GetCurrentYear(w http.ResponseWriter, r *http.Request) {
+	// Step 1: Verify that the user is authenticated.
+	// GetSchoolID reads the school UUID from the JWT claims in the request
+	// context. If the auth middleware has not run (e.g. misconfigured routes)
+	// this returns an error and we must reject the request immediately.
+	_, err := auth.GetSchoolID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Step 1b: Retrieve the transaction-scoped Queries from context.
+	// This Queries object is bound to a PostgreSQL transaction that already has
+	// the RLS tenant variable (app.current_school_id) set, so every query
+	// through it is automatically filtered to the current school — the handler
+	// never needs to pass school_id explicitly.
+	queries := auth.GetQueries(r.Context())
+	if queries == nil {
+		// This should never happen when the middleware chain is correctly wired,
+		// but we guard against it to avoid a nil-pointer panic in the handler.
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 2: Query the database for the current school year.
+	// GetCurrentSchoolYear uses current_school_id() in the SQL, which reads
+	// the PostgreSQL session variable set by the TenantContext middleware.
+	// The query returns exactly one row (the current year) or pgx.ErrNoRows.
+	year, err := queries.GetCurrentSchoolYear(r.Context())
+	if err != nil {
+		// If no rows are found, the school has not yet configured a current
+		// school year. This is a valid business state (e.g. the school is newly
+		// created). We return 404 with a descriptive message rather than 500
+		// so that the frontend can show a friendly "no year configured" screen.
+		if errors.Is(err, pgx.ErrNoRows) {
+			httputil.NotFound(w, "No current school year configured")
+			return
+		}
+		// For any other database error (connection loss, RLS misconfiguration,
+		// unexpected schema change), log the full error internally and return
+		// a generic 500 response. We never expose raw DB errors to the client.
+		h.logger.Error("get_current_year: database query failed", "error", err)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 3: Build the response struct by mapping DB fields to JSON-friendly types.
+	// pgtype.Date stores the date as a time.Time value and a Valid boolean flag.
+	// We convert it to a plain "YYYY-MM-DD" string using the formatPgDate helper
+	// defined below, which is safe to call even when Valid = false (returns "").
+	httputil.Success(w, schoolYearResponse{
+		ID:        year.ID.String(),
+		Label:     year.Label,
+		StartDate: formatPgDate(year.StartDate),
+		EndDate:   formatPgDate(year.EndDate),
+		Sem1Start: formatPgDate(year.Sem1Start),
+		Sem1End:   formatPgDate(year.Sem1End),
+		Sem2Start: formatPgDate(year.Sem2Start),
+		Sem2End:   formatPgDate(year.Sem2End),
+		IsCurrent: year.IsCurrent,
+	})
+}
+
+// formatPgDate converts a pgtype.Date value to an ISO 8601 "YYYY-MM-DD" string.
+//
+// pgtype.Date wraps the Go time.Time type with a Valid flag (similar to
+// database/sql.NullTime). When Valid = false the column contained SQL NULL;
+// we return an empty string in that case rather than a zero-time string such
+// as "0001-01-01", which would be misleading to API consumers.
+//
+// This function is defined in the school package rather than in httputil
+// because it is specific to the school year domain and not used elsewhere yet.
+//
+// Example output: "2026-09-14"
+func formatPgDate(d pgtype.Date) string {
+	// pgtype.Date.Valid is false when the database column contained SQL NULL.
+	// Returning an empty string is the least-surprising behaviour for API
+	// consumers: they can check `if date == ""` rather than parsing a sentinel.
+	if !d.Valid {
+		return ""
+	}
+	// time.Time.Format uses Go's reference time layout ("Mon Jan 2 15:04:05 MST 2006").
+	// "2006-01-02" is the magic layout string that produces ISO 8601 date output.
+	return d.Time.Format("2006-01-02")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
