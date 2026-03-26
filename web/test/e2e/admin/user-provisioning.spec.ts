@@ -46,13 +46,13 @@
  * side) using the `fetch()` global that is available in Node 18+.
  *
  * To authenticate API calls we need a valid JWT access token. Rather than
- * duplicating the login/MFA logic, we use Playwright's page.request API (which includes cookies automatically)
+ * duplicating the login/MFA logic, we extract the token from localStorage
  * via `page.evaluate()` after the auth fixture has logged in.
  *
- * HOW AUTHENTICATION WORKS
+ * WHY page.evaluate() TO READ localStorage?
  * ──────────────────────────────────────────
  * The auth fixture (auth.fixture.ts) calls the real login + MFA APIs and
- * then the API sets httpOnly cookies that are included automatically in
+ * then writes the resulting tokens into the browser's localStorage under the
  * keys `catalogro_access_token` and `catalogro_refresh_token`. Reading those
  * keys from the test gives us a token that is identical to what the browser
  * would use — no token duplication, no extra network calls.
@@ -89,6 +89,44 @@ import { test, expect } from '../fixtures/auth.fixture';
  * self-contained and easy for a junior to understand without jumping files.
  */
 const API_BASE = 'http://localhost:8080/api/v1';
+
+// ── Helper: extract the access token from the authenticated browser ────────────
+
+/**
+ * getAccessToken
+ *
+ * Reads the JWT access token that the auth fixture stored in localStorage.
+ *
+ * The auth fixture logs in via the real API and writes the tokens to:
+ *   localStorage['catalogro_access_token']  → short-lived JWT (15 min)
+ *   localStorage['catalogro_refresh_token'] → long-lived refresh (7 days)
+ *
+ * We read the access token here so we can attach it as a Bearer header when
+ * calling the API directly from the test's Node.js process.
+ *
+ * NOTE: `page.evaluate()` runs JavaScript inside the browser context —
+ * that is where localStorage lives. The result is returned as a plain
+ * JavaScript value back to Node.js.
+ *
+ * @param page - A Playwright Page instance that is already authenticated.
+ * @returns The JWT access token string, or throws if it is missing.
+ */
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
+  // Run inside the browser: read the token key the Nuxt auth composable uses.
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
+
+  if (token === null || token === '') {
+    // This should never happen if the auth fixture ran successfully.
+    // If it does, the fixture failed silently — surface a clear error.
+    throw new Error(
+      'catalogro_access_token not found in localStorage. ' +
+        'Did the auth fixture complete login successfully?',
+    );
+  }
+
+  return token;
+}
+
 // ── Helper: generate a unique email address ────────────────────────────────────
 
 /**
@@ -181,8 +219,10 @@ test.describe('user provisioning', () => {
     /**
      * Step 1: Get the secretary's access token from the authenticated browser
      * session. The auth fixture already completed login + MFA and stored the
-     * httpOnly auth cookie.
+     * token in localStorage.
      */
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Step 2: Build the payload for a new teacher account.
      * We use uniqueEmail() to avoid email collisions across reruns.
@@ -204,10 +244,15 @@ test.describe('user provisioning', () => {
      *   - The response is directly available as a JS object — no serialisation.
      *   - It keeps networking logic out of the browser context, which is cleaner.
      *
-     * The httpOnly auth cookie authenticates the request automatically.
+     * The Authorization header carries the secretary's Bearer token.
      */
-    const response = await secretaryPage.request.post(`${API_BASE}/users`, {
-      data: payload,
+    const response = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     });
 
     /**
@@ -216,8 +261,8 @@ test.describe('user provisioning', () => {
      * message shows the actual status code so we know if it was 400/403/500.
      */
     expect(
-      response.status(),
-      `Expected 201 Created but got ${String(response.status())}. ` +
+      response.status,
+      `Expected 201 Created but got ${String(response.status)}. ` +
         'Check that the secretary role is authorised for POST /api/v1/users.',
     ).toBe(201);
 
@@ -278,20 +323,27 @@ test.describe('user provisioning', () => {
     secretaryPage,
   }) => {
     /**
-     * Retrieve the secretary's httpOnly auth cookies.
-     * Same pattern as test 74 — page.request includes cookies automatically.
+     * Retrieve the secretary's token from the browser's localStorage.
+     * Same pattern as test 74 — see getAccessToken() for details.
      */
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Call GET /api/v1/users directly from Node.js.
-     * The httpOnly auth cookie scopes the query to the secretary's school
+     * The Authorization header scopes the query to the secretary's school
      * via the JWT claim `school_id` read by the RLS middleware.
      */
-    const response = await secretaryPage.request.get(`${API_BASE}/users`);
+    const response = await fetch(`${API_BASE}/users`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     // The list endpoint must succeed for an authorised secretary.
     expect(
-      response.status(),
-      `Expected 200 OK but got ${String(response.status())}. ` +
+      response.status,
+      `Expected 200 OK but got ${String(response.status)}. ` +
         'Check that GET /api/v1/users is reachable for the secretary role.',
     ).toBe(200);
 
@@ -358,26 +410,33 @@ test.describe('user provisioning', () => {
   test('76 – newly created user appears in the pending activations list', async ({
     secretaryPage,
   }) => {
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Step 1: Create a new user so we have a known pending account.
      * We give this user a distinct email so we can identify it in the list.
      */
     const newUserEmail = uniqueEmail('pending.check');
 
-    const createResponse = await secretaryPage.request.post(`${API_BASE}/users`, {
-      data: {
+    const createResponse = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         email: newUserEmail,
         first_name: 'Roxana',
         last_name: 'Stancu',
         role: 'teacher',
-      },
+      }),
     });
 
     // The creation must succeed before we can test the pending list.
     // If this assertion fails, the test is blocked — that is intentional.
     expect(
-      createResponse.status(),
-      `Prerequisite failed: POST /api/v1/users returned ${String(createResponse.status())}. ` +
+      createResponse.status,
+      `Prerequisite failed: POST /api/v1/users returned ${String(createResponse.status)}. ` +
         'Cannot test pending list without a freshly created user.',
     ).toBe(201);
 
@@ -386,11 +445,16 @@ test.describe('user provisioning', () => {
      * This endpoint returns only users whose `activated_at` column is NULL —
      * i.e., accounts that have been provisioned but not yet activated.
      */
-    const pendingResponse = await secretaryPage.request.get(`${API_BASE}/users/pending`);
+    const pendingResponse = await fetch(`${API_BASE}/users/pending`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     expect(
-      pendingResponse.status(),
-      `Expected 200 OK from GET /api/v1/users/pending but got ${String(pendingResponse.status())}.`,
+      pendingResponse.status,
+      `Expected 200 OK from GET /api/v1/users/pending but got ${String(pendingResponse.status)}.`,
     ).toBe(200);
 
     const pendingBody = (await pendingResponse.json()) as ListUsersResponse;
@@ -444,17 +508,24 @@ test.describe('user provisioning', () => {
      * The parent fixture is logged in as Ion Moldovan (role: parent, no MFA).
      * We extract the parent's token the same way we do for secretary tests.
      */
+    const token = await getAccessToken(parentPage);
+
     /**
      * Attempt to create a user with the parent's Bearer token.
      * The API must inspect the `role` claim inside the JWT and reject it.
      */
-    const response = await parentPage.request.post(`${API_BASE}/users`, {
-      data: {
+    const response = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         email: uniqueEmail('forbidden.attempt'),
         first_name: 'Ghost',
         last_name: 'User',
         role: 'teacher',
-      },
+      }),
     });
 
     /**
@@ -468,9 +539,9 @@ test.describe('user provisioning', () => {
      * bug — a parent could provision arbitrary accounts.
      */
     expect(
-      response.status(),
+      response.status,
       `Expected 403 Forbidden for a parent calling POST /api/v1/users, ` +
-        `but got ${String(response.status())}. ` +
+        `but got ${String(response.status)}. ` +
         'This is an access-control failure — the parent role must be rejected.',
     ).toBe(403);
   });
@@ -510,22 +581,29 @@ test.describe('user provisioning', () => {
   // route, blank page) — those indicate the provisioning system is broken.
   // ───────────────────────────────────────────────────────────────────────────
   test('78 – provisioned user activation URL is navigable', async ({ secretaryPage }) => {
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Step 1: Create a user and retrieve the activation_url.
      * We use a fresh unique email to avoid reusing a URL from a previous test.
      */
-    const createResponse = await secretaryPage.request.post(`${API_BASE}/users`, {
-      data: {
+    const createResponse = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         email: uniqueEmail('activate.url.check'),
         first_name: 'Teodora',
         last_name: 'Neagu',
         role: 'teacher',
-      },
+      }),
     });
 
     expect(
-      createResponse.status(),
-      `Prerequisite failed: POST /api/v1/users returned ${String(createResponse.status())}. ` +
+      createResponse.status,
+      `Prerequisite failed: POST /api/v1/users returned ${String(createResponse.status)}. ` +
         'Cannot test activation URL without a successful user creation.',
     ).toBe(201);
 

@@ -99,7 +99,8 @@ const API_BASE = 'http://localhost:8080/api/v1';
  * localStorage key names — copied from lib/api.ts (they are module-private
  * there, so we duplicate them here for test setup/assertion purposes).
  */
-// Token localStorage keys removed — cookie-based auth doesn't use localStorage.
+const ACCESS_TOKEN_KEY = 'catalogro_access_token';
+const REFRESH_TOKEN_KEY = 'catalogro_refresh_token';
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -289,20 +290,20 @@ describe('api() — typed fetch wrapper', () => {
     expect(mockFetch.mock.calls[1][0]).toBe(`${API_BASE}/auth/refresh`);
 
     /**
-     * ASSERT 4 — with cookie-based auth, tokens are NOT stored in localStorage.
-     * The server sets httpOnly cookies on the refresh response, and the browser
-     * sends them automatically on subsequent requests via credentials:'include'.
-     * We verify the retry happened (ASSERT 2 + 3) which confirms the refresh
-     * flow worked, even though we can't inspect cookie values in unit tests.
+     * ASSERT 4 — after a successful refresh, the new tokens are stored in
+     * localStorage so the third (retry) request carries the new access token.
      */
-    // localStorage assertions removed — tokens are in cookies now.
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('new-access-token');
+    expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('new-refresh-token');
 
     /**
-     * ASSERT 5 — the retry (3rd call) uses credentials:'include' to send
-     * cookies. With cookie auth, there's no Authorization header.
+     * ASSERT 5 — the retry (3rd call) used the new access token in the
+     * Authorization header.
      */
     const retryInit = mockFetch.mock.calls[2][1] as RequestInit;
-    expect(retryInit.credentials).toBe('include');
+    expect((retryInit.headers as Record<string, string>)['Authorization']).toBe(
+      'Bearer new-access-token',
+    );
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -359,9 +360,12 @@ describe('api() — typed fetch wrapper', () => {
       configurable: true,
     });
 
-    // With cookie-based auth, setTokens is a no-op. The pre-populated tokens
-    // are in cookies (set by the mock server), not localStorage.
-    // We skip the localStorage pre-check since cookies aren't observable here.
+    // Pre-populate tokens — they should be gone after the failed refresh.
+    setTokens('old-access-token', 'old-refresh-token');
+
+    // Confirm the tokens are actually in localStorage before the test action.
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('old-access-token');
+    expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('old-refresh-token');
 
     // ACT — this call will hit 401, attempt refresh (which also fails), and
     // then clearTokens().  Because the refresh itself returns a non-ok
@@ -380,12 +384,10 @@ describe('api() — typed fetch wrapper', () => {
     }
 
     /**
-     * ASSERT — with cookie auth, clearTokens() is a no-op (server clears cookies).
-     * We verify the redirect happened (window.location.href set) which confirms
-     * the failed-refresh path executed. Cookie clearing happens server-side
-     * when the user hits /auth/logout or when MaxAge expires.
+     * ASSERT — both tokens must be cleared from localStorage.
      */
-    // localStorage assertions removed — tokens are in cookies now.
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+    expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
 
     // Restore window.location to its original descriptor if it existed.
     if (locationDescriptor) {

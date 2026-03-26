@@ -46,7 +46,7 @@
  * directly from the test (Node.js side) using the `fetch()` global available
  * in Node 18+.
  *
- * Authentication uses httpOnly cookies sent automatically by page.request
+ * Authentication tokens are extracted from localStorage via page.evaluate()
  * after the auth fixture has completed login.
  *
  * FIXTURES USED
@@ -98,6 +98,30 @@ const STUDENT_ANDREI_ID = 'b1000000-0000-0000-0000-000000000101';
  * Used for the duplicate-enrollment test (Test 90).
  */
 const STUDENT_201_ID = 'b1000000-0000-0000-0000-000000000201';
+
+// ── Helper: extract the access token from the authenticated browser ────────────
+
+/**
+ * getAccessToken
+ *
+ * Reads the JWT access token stored in localStorage by the auth fixture.
+ *
+ * @param page - A Playwright Page that is already authenticated.
+ * @returns The JWT access token string, or throws if it is missing.
+ */
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
+
+  if (token === null || token === '') {
+    throw new Error(
+      'catalogro_access_token not found in localStorage. ' +
+        'Did the auth fixture complete login successfully?',
+    );
+  }
+
+  return token;
+}
+
 // ── Helper types ───────────────────────────────────────────────────────────────
 
 /**
@@ -175,21 +199,28 @@ test.describe('enrollment management', () => {
      * Step 1: Get the secretary's JWT access token.
      * The auth fixture already completed login + MFA for Elena Ionescu.
      */
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Step 2: Call POST /api/v1/classes/{classId}/enroll.
      * We enrol Andrei Moldovan (who is NOT yet in class6B) so there is no
      * pre-existing enrollment to conflict with.
      */
-    const response = await secretaryPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
-      data: { student_id: STUDENT_ANDREI_ID },
+    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ student_id: STUDENT_ANDREI_ID }),
     });
 
     /**
      * Step 3: Assert HTTP 201 Created.
      */
     expect(
-      response.status(),
-      `Expected 201 Created but got ${String(response.status())}. ` +
+      response.status,
+      `Expected 201 Created but got ${String(response.status)}. ` +
         'Check that the secretary role is authorised for POST /enroll and ' +
         'that the student is not already enrolled.',
     ).toBe(201);
@@ -228,6 +259,8 @@ test.describe('enrollment management', () => {
   //   - The array contains an entry whose "id" matches STUDENT_ANDREI_ID.
   // ───────────────────────────────────────────────────────────────────────────
   test('88 – enrolled student appears in class roster', async ({ secretaryPage }) => {
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Step 1: Enrol Andrei Moldovan in class6B.
      * We use the same student/class combination as Test 87.
@@ -236,29 +269,34 @@ test.describe('enrollment management', () => {
      * both 201 (fresh enrolment) and 409 (already enrolled from previous run)
      * as valid prerequisites — what matters is that the student IS enrolled.
      */
-    const enrollResponse = await secretaryPage.request.post(
-      `${API_BASE}/classes/${CLASS_6B_ID}/enroll`,
-      {
-        data: { student_id: STUDENT_ANDREI_ID },
+    const enrollResponse = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
       },
-    );
+      body: JSON.stringify({ student_id: STUDENT_ANDREI_ID }),
+    });
 
     // Accept 201 (newly enrolled) or 409 (already enrolled from a previous test).
     // Either way, the student is in the class — which is the precondition we need.
     expect(
-      [201, 409].includes(enrollResponse.status()),
-      `Prerequisite: expected 201 or 409 from POST /enroll, got ${String(enrollResponse.status())}.`,
+      [201, 409].includes(enrollResponse.status),
+      `Prerequisite: expected 201 or 409 from POST /enroll, got ${String(enrollResponse.status)}.`,
     ).toBe(true);
 
     /**
      * Step 2: Fetch the class detail which includes the students array.
      * GET /api/v1/classes/{classId} returns the class with its enrolled students.
      */
-    const classResponse = await secretaryPage.request.get(`${API_BASE}/classes/${CLASS_6B_ID}`);
+    const classResponse = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     expect(
-      classResponse.status(),
-      `Expected 200 OK from GET /classes/${CLASS_6B_ID}, got ${String(classResponse.status())}.`,
+      classResponse.status,
+      `Expected 200 OK from GET /classes/${CLASS_6B_ID}, got ${String(classResponse.status)}.`,
     ).toBe(200);
 
     const classBody = (await classResponse.json()) as ClassDetailResponse;
@@ -296,13 +334,20 @@ test.describe('enrollment management', () => {
   //   - Response body is empty (no JSON, no error text).
   // ───────────────────────────────────────────────────────────────────────────
   test('89 – secretary can unenrol a student', async ({ secretaryPage }) => {
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Step 1: Ensure the student is enrolled before we try to remove them.
      * This makes the test independent of whether Test 87 ran first.
      * A 409 here means they are already enrolled — that is fine for our purpose.
      */
-    await secretaryPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
-      data: { student_id: STUDENT_ANDREI_ID },
+    await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ student_id: STUDENT_ANDREI_ID }),
     });
     // We intentionally do not assert the status here — we only care that the
     // student exists in the class before the DELETE runs.
@@ -310,16 +355,17 @@ test.describe('enrollment management', () => {
     /**
      * Step 2: Call DELETE /classes/{classId}/enroll/{studentId}.
      */
-    const response = await secretaryPage.request.delete(
-      `${API_BASE}/classes/${CLASS_6B_ID}/enroll/${STUDENT_ANDREI_ID}`,
-    );
+    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/enroll/${STUDENT_ANDREI_ID}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     /**
      * Step 3: Assert HTTP 204 No Content.
      */
     expect(
-      response.status(),
-      `Expected 204 No Content but got ${String(response.status())}. ` +
+      response.status,
+      `Expected 204 No Content but got ${String(response.status)}. ` +
         'Check that the secretary role is authorised for DELETE /enroll/{studentId}.',
     ).toBe(204);
 
@@ -347,13 +393,20 @@ test.describe('enrollment management', () => {
   //   - Response body contains { "error": { "code": "DUPLICATE_ENROLLMENT", ... } }.
   // ───────────────────────────────────────────────────────────────────────────
   test('90 – duplicate enrollment returns 409 Conflict', async ({ secretaryPage }) => {
+    const token = await getAccessToken(secretaryPage);
+
     /**
      * Try to enrol student 201 in class6B.
      * This student is already enrolled via seed data, so the unique constraint
      * fires immediately — no setup needed.
      */
-    const response = await secretaryPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
-      data: { student_id: STUDENT_201_ID },
+    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ student_id: STUDENT_201_ID }),
     });
 
     /**
@@ -365,8 +418,8 @@ test.describe('enrollment management', () => {
      * A 500 here means the handler is not catching the pgconn 23505 error.
      */
     expect(
-      response.status(),
-      `Expected 409 Conflict for duplicate enrollment, got ${String(response.status())}. ` +
+      response.status,
+      `Expected 409 Conflict for duplicate enrollment, got ${String(response.status)}. ` +
         'The handler must detect pgconn error 23505 and return 409.',
     ).toBe(409);
 
@@ -403,12 +456,19 @@ test.describe('enrollment management', () => {
     /**
      * The parent fixture is logged in as Ion Moldovan (role: parent, no MFA).
      */
+    const token = await getAccessToken(parentPage);
+
     /**
      * Attempt to enrol a student with the parent's Bearer token.
      * The API must inspect the `role` claim in the JWT and reject it with 403.
      */
-    const response = await parentPage.request.post(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
-      data: { student_id: STUDENT_ANDREI_ID },
+    const response = await fetch(`${API_BASE}/classes/${CLASS_6B_ID}/enroll`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ student_id: STUDENT_ANDREI_ID }),
     });
 
     /**
@@ -422,9 +482,9 @@ test.describe('enrollment management', () => {
      * able to enrol or unenrol students.
      */
     expect(
-      response.status(),
+      response.status,
       `Expected 403 Forbidden for a parent calling POST /enroll, ` +
-        `but got ${String(response.status())}. ` +
+        `but got ${String(response.status)}. ` +
         'This is an access-control failure — only admin and secretary may enrol students.',
     ).toBe(403);
   });

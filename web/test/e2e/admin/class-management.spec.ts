@@ -43,7 +43,7 @@
  * are implemented. We call the API directly from the test (Node.js side)
  * using the `fetch()` global available in Node 18+.
  *
- * Authentication uses httpOnly cookies sent automatically by page.request
+ * Authentication tokens are extracted from localStorage via page.evaluate()
  * after the auth fixture has completed login.
  *
  * FIXTURES USED
@@ -69,6 +69,33 @@ import { test, expect } from '../fixtures/auth.fixture';
  * API base URL — must match the Go server's listen address.
  */
 const API_BASE = 'http://localhost:8080/api/v1';
+
+// ── Helper: extract the access token from the authenticated browser ────────────
+
+/**
+ * getAccessToken
+ *
+ * Reads the JWT access token that the auth fixture stored in localStorage.
+ *
+ * The auth fixture logs in via the real API and writes the tokens to:
+ *   localStorage['catalogro_access_token']  → short-lived JWT (15 min)
+ *
+ * @param page - A Playwright Page instance that is already authenticated.
+ * @returns The JWT access token string, or throws if it is missing.
+ */
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
+
+  if (token === null || token === '') {
+    throw new Error(
+      'catalogro_access_token not found in localStorage. ' +
+        'Did the auth fixture complete login successfully?',
+    );
+  }
+
+  return token;
+}
+
 // ── Helper: generate a unique class name ───────────────────────────────────────
 
 /**
@@ -152,15 +179,16 @@ interface ListClassesResponse {
  * ALTERNATIVE: seed.sql must contain a known school_year_id that we can
  * hard-code here. We use the dynamic approach to avoid coupling to a seed UUID.
  *
- * @param page - A Playwright Page with an active authenticated session.
+ * @param token - The admin's JWT access token.
  * @returns The school_year_id UUID string.
  */
-async function getSchoolYearId(page: import('@playwright/test').Page): Promise<string> {
+async function getSchoolYearId(token: string): Promise<string> {
   // Probe by listing classes — if any exist, take the first one's school_year_id.
-  // page.request automatically sends the httpOnly auth cookies.
-  const listResp = await page.request.get(`${API_BASE}/classes`);
+  const listResp = await fetch(`${API_BASE}/classes`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 
-  if (listResp.ok()) {
+  if (listResp.ok) {
     const body = (await listResp.json()) as ListClassesResponse;
     if (Array.isArray(body.data) && body.data.length > 0 && body.data[0].school_year_id) {
       return body.data[0].school_year_id;
@@ -171,7 +199,7 @@ async function getSchoolYearId(page: import('@playwright/test').Page): Promise<s
   // This means the seed data has not been loaded yet. The tests that call this
   // helper will skip themselves with a clear message via test.skip().
   throw new Error(
-    `Cannot determine current school_year_id: GET /classes returned ${String(listResp.status())} ` +
+    `Cannot determine current school_year_id: GET /classes returned ${String(listResp.status)} ` +
       `with no class data. Make sure the database seed has run (make seed).`,
   );
 }
@@ -212,13 +240,15 @@ test.describe('class management', () => {
     /**
      * Step 1: Get the admin's access token from the authenticated browser session.
      */
+    const token = await getAccessToken(adminPage);
+
     /**
      * Step 2: Discover the current school_year_id by listing existing classes.
      * The seed data (make seed) creates at least one class, so this should succeed.
      */
     let schoolYearId: string;
     try {
-      schoolYearId = await getSchoolYearId(adminPage);
+      schoolYearId = await getSchoolYearId(token);
     } catch (err) {
       // If we cannot determine the school year, skip the test with a clear message.
       test.skip(true, String(err));
@@ -240,16 +270,21 @@ test.describe('class management', () => {
     /**
      * Step 4: Call POST /api/v1/classes.
      */
-    const response = await adminPage.request.post(`${API_BASE}/classes`, {
-      data: payload,
+    const response = await fetch(`${API_BASE}/classes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     });
 
     /**
      * Step 5: Assert HTTP 201 Created.
      */
     expect(
-      response.status(),
-      `Expected 201 Created but got ${String(response.status())}. ` +
+      response.status,
+      `Expected 201 Created but got ${String(response.status)}. ` +
         'Check that the admin role is authorised for POST /api/v1/classes.',
     ).toBe(201);
 
@@ -289,9 +324,11 @@ test.describe('class management', () => {
   //   - The array contains an entry whose "name" matches the class we created.
   // ───────────────────────────────────────────────────────────────────────────
   test('84 – created class appears in GET /classes list', async ({ adminPage }) => {
+    const token = await getAccessToken(adminPage);
+
     let schoolYearId: string;
     try {
-      schoolYearId = await getSchoolYearId(adminPage);
+      schoolYearId = await getSchoolYearId(token);
     } catch (err) {
       test.skip(true, String(err));
       return;
@@ -303,18 +340,23 @@ test.describe('class management', () => {
      */
     const className = uniqueClassName('7B');
 
-    const createResponse = await adminPage.request.post(`${API_BASE}/classes`, {
-      data: {
+    const createResponse = await fetch(`${API_BASE}/classes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         school_year_id: schoolYearId,
         name: className,
         education_level: 'middle',
         grade_number: 7,
-      },
+      }),
     });
 
     expect(
-      createResponse.status(),
-      `Prerequisite failed: POST /api/v1/classes returned ${String(createResponse.status())}. ` +
+      createResponse.status,
+      `Prerequisite failed: POST /api/v1/classes returned ${String(createResponse.status)}. ` +
         'Cannot test list without a freshly created class.',
     ).toBe(201);
 
@@ -322,11 +364,16 @@ test.describe('class management', () => {
      * Step 2: Fetch the list of classes for the current school year.
      * GET /api/v1/classes returns all classes the user is authorised to see.
      */
-    const listResponse = await adminPage.request.get(`${API_BASE}/classes`);
+    const listResponse = await fetch(`${API_BASE}/classes`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     expect(
-      listResponse.status(),
-      `Expected 200 OK from GET /api/v1/classes but got ${String(listResponse.status())}.`,
+      listResponse.status,
+      `Expected 200 OK from GET /api/v1/classes but got ${String(listResponse.status)}.`,
     ).toBe(200);
 
     const listBody = (await listResponse.json()) as ListClassesResponse;
@@ -367,9 +414,11 @@ test.describe('class management', () => {
   //   - response.data.id matches the class we updated.
   // ───────────────────────────────────────────────────────────────────────────
   test('85 – admin can update class name', async ({ adminPage }) => {
+    const token = await getAccessToken(adminPage);
+
     let schoolYearId: string;
     try {
-      schoolYearId = await getSchoolYearId(adminPage);
+      schoolYearId = await getSchoolYearId(token);
     } catch (err) {
       test.skip(true, String(err));
       return;
@@ -380,18 +429,23 @@ test.describe('class management', () => {
      */
     const originalName = uniqueClassName('8C');
 
-    const createResponse = await adminPage.request.post(`${API_BASE}/classes`, {
-      data: {
+    const createResponse = await fetch(`${API_BASE}/classes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         school_year_id: schoolYearId,
         name: originalName,
         education_level: 'middle',
         grade_number: 8,
-      },
+      }),
     });
 
     expect(
-      createResponse.status(),
-      `Prerequisite failed: POST /api/v1/classes returned ${String(createResponse.status())}.`,
+      createResponse.status,
+      `Prerequisite failed: POST /api/v1/classes returned ${String(createResponse.status)}.`,
     ).toBe(201);
 
     const createBody = (await createResponse.json()) as CreateClassResponse;
@@ -406,19 +460,24 @@ test.describe('class management', () => {
      */
     const newName = uniqueClassName('8D');
 
-    const updateResponse = await adminPage.request.put(`${API_BASE}/classes/${classId}`, {
-      data: {
-        name: newName,
+    const updateResponse = await fetch(`${API_BASE}/classes/${classId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
       },
+      body: JSON.stringify({
+        name: newName,
+      }),
     });
 
     /**
      * Step 3: Assert HTTP 200 OK.
      */
     expect(
-      updateResponse.status(),
+      updateResponse.status,
       `Expected 200 OK from PUT /api/v1/classes/${classId}, ` +
-        `but got ${String(updateResponse.status())}.`,
+        `but got ${String(updateResponse.status)}.`,
     ).toBe(200);
 
     /**
@@ -457,19 +516,26 @@ test.describe('class management', () => {
     /**
      * The parent fixture is logged in as Ion Moldovan (role: parent, no MFA).
      */
+    const token = await getAccessToken(parentPage);
+
     /**
      * Attempt to create a class with the parent's Bearer token.
      * The API must inspect the `role` claim in the JWT and reject it.
      * We use a random school_year_id so the payload at least looks structurally
      * valid — we want to test the role check, not the validation logic.
      */
-    const response = await parentPage.request.post(`${API_BASE}/classes`, {
-      data: {
+    const response = await fetch(`${API_BASE}/classes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         school_year_id: '00000000-0000-0000-0000-000000000001',
         name: uniqueClassName('ForbiddenClass'),
         education_level: 'middle',
         grade_number: 5,
-      },
+      }),
     });
 
     /**
@@ -483,9 +549,9 @@ test.describe('class management', () => {
      * not working — a serious access-control bug.
      */
     expect(
-      response.status(),
+      response.status,
       `Expected 403 Forbidden for a parent calling POST /api/v1/classes, ` +
-        `but got ${String(response.status())}. ` +
+        `but got ${String(response.status)}. ` +
         'This is an access-control failure — the parent role must be rejected.',
     ).toBe(403);
   });

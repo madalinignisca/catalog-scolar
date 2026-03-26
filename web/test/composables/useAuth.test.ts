@@ -205,8 +205,10 @@ describe('useAuth', () => {
     // The user profile should be populated with the mock data.
     expect(auth.user.value).toEqual(MOCK_USER);
 
-    // With cookie-based auth, tokens are set via httpOnly cookies by the API.
-    // localStorage is no longer used for token storage.
+    // Tokens should have been written to localStorage.
+    // localStorage keys are defined as constants inside lib/api.ts.
+    expect(localStorage.getItem('catalogro_access_token')).toBe('at');
+    expect(localStorage.getItem('catalogro_refresh_token')).toBe('rt');
   });
 
   // ── Test 2 ─────────────────────────────────────────────────────────────────
@@ -253,8 +255,8 @@ describe('useAuth', () => {
     expect(auth.user.value).toBeNull();
 
     // No tokens should be stored.
-    // With cookie-based auth, tokens are cleared via server-side cookie expiry.
-    // No localStorage assertions needed.
+    expect(localStorage.getItem('catalogro_access_token')).toBeNull();
+    expect(localStorage.getItem('catalogro_refresh_token')).toBeNull();
   });
 
   // ── Test 3 ─────────────────────────────────────────────────────────────────
@@ -304,7 +306,8 @@ describe('useAuth', () => {
     expect(auth.user.value).toEqual(MOCK_USER);
 
     // MFA flow returns different token values — verify those were stored.
-    // With cookie-based auth, MFA tokens are set via httpOnly cookies by the API.
+    expect(localStorage.getItem('catalogro_access_token')).toBe('at-mfa');
+    expect(localStorage.getItem('catalogro_refresh_token')).toBe('rt-mfa');
   });
 
   // ── Test 4 ─────────────────────────────────────────────────────────────────
@@ -376,8 +379,8 @@ describe('useAuth', () => {
     expect(auth.isAuthenticated.value).toBe(false);
 
     // Both token keys must have been removed from localStorage.
-    // With cookie-based auth, tokens are cleared via server-side cookie expiry.
-    // No localStorage assertions needed.
+    expect(localStorage.getItem('catalogro_access_token')).toBeNull();
+    expect(localStorage.getItem('catalogro_refresh_token')).toBeNull();
   });
 
   // ── Test 5 ─────────────────────────────────────────────────────────────────

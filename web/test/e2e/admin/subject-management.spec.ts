@@ -41,7 +41,7 @@
  * are implemented. We call the API directly from the test (Node.js side)
  * using the `fetch()` global available in Node 18+.
  *
- * Authentication uses httpOnly cookies sent automatically by page.request
+ * Authentication tokens are extracted from localStorage via page.evaluate()
  * after the auth fixture has completed login.
  *
  * FIXTURES USED
@@ -67,6 +67,33 @@ import { test, expect } from '../fixtures/auth.fixture';
  * API base URL — must match the Go server's listen address.
  */
 const API_BASE = 'http://localhost:8080/api/v1';
+
+// ── Helper: extract the access token from the authenticated browser ────────────
+
+/**
+ * getAccessToken
+ *
+ * Reads the JWT access token that the auth fixture stored in localStorage.
+ *
+ * The auth fixture logs in via the real API and writes the tokens to:
+ *   localStorage['catalogro_access_token']  → short-lived JWT (15 min)
+ *
+ * @param page - A Playwright Page instance that is already authenticated.
+ * @returns The JWT access token string, or throws if it is missing.
+ */
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
+
+  if (token === null || token === '') {
+    throw new Error(
+      'catalogro_access_token not found in localStorage. ' +
+        'Did the auth fixture complete login successfully?',
+    );
+  }
+
+  return token;
+}
+
 // ── Helper: generate a unique subject name ─────────────────────────────────────
 
 /**
@@ -155,6 +182,8 @@ test.describe('subject management', () => {
      * Step 1: Get the admin's access token from the authenticated browser
      * session. The auth fixture already completed login + MFA.
      */
+    const token = await getAccessToken(adminPage);
+
     /**
      * Step 2: Build the payload for a new subject.
      * We use uniqueSubjectName() to avoid name collisions across test reruns.
@@ -169,18 +198,23 @@ test.describe('subject management', () => {
 
     /**
      * Step 3: Call POST /api/v1/subjects directly from Node.js.
-     * The httpOnly auth cookie authenticates the request automatically.
+     * The Authorization header carries the admin's Bearer token.
      */
-    const response = await adminPage.request.post(`${API_BASE}/subjects`, {
-      data: payload,
+    const response = await fetch(`${API_BASE}/subjects`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
     });
 
     /**
      * Step 4: Assert HTTP 201 Created.
      */
     expect(
-      response.status(),
-      `Expected 201 Created but got ${String(response.status())}. ` +
+      response.status,
+      `Expected 201 Created but got ${String(response.status)}. ` +
         'Check that the admin role is authorised for POST /api/v1/subjects.',
     ).toBe(201);
 
@@ -223,23 +257,30 @@ test.describe('subject management', () => {
   //   - The array contains an entry whose "name" matches the subject we created.
   // ───────────────────────────────────────────────────────────────────────────
   test('80 – created subject appears in GET /subjects list', async ({ adminPage }) => {
+    const token = await getAccessToken(adminPage);
+
     /**
      * Step 1: Create a new subject with a unique name so we can identify it
      * in the list without ambiguity.
      */
     const subjectName = uniqueSubjectName('Fizică E2E');
 
-    const createResponse = await adminPage.request.post(`${API_BASE}/subjects`, {
-      data: {
+    const createResponse = await fetch(`${API_BASE}/subjects`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         name: subjectName,
         education_level: 'high',
         has_thesis: false,
-      },
+      }),
     });
 
     expect(
-      createResponse.status(),
-      `Prerequisite failed: POST /api/v1/subjects returned ${String(createResponse.status())}. ` +
+      createResponse.status,
+      `Prerequisite failed: POST /api/v1/subjects returned ${String(createResponse.status)}. ` +
         'Cannot test list without a freshly created subject.',
     ).toBe(201);
 
@@ -247,11 +288,16 @@ test.describe('subject management', () => {
      * Step 2: Fetch the list of subjects.
      * GET /api/v1/subjects returns all active subjects for the current school.
      */
-    const listResponse = await adminPage.request.get(`${API_BASE}/subjects`);
+    const listResponse = await fetch(`${API_BASE}/subjects`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     expect(
-      listResponse.status(),
-      `Expected 200 OK from GET /api/v1/subjects but got ${String(listResponse.status())}.`,
+      listResponse.status,
+      `Expected 200 OK from GET /api/v1/subjects but got ${String(listResponse.status)}.`,
     ).toBe(200);
 
     const listBody = (await listResponse.json()) as ListSubjectsResponse;
@@ -295,16 +341,23 @@ test.describe('subject management', () => {
     /**
      * The parent fixture is logged in as Ion Moldovan (role: parent, no MFA).
      */
+    const token = await getAccessToken(parentPage);
+
     /**
      * Attempt to create a subject with the parent's Bearer token.
      * The API must inspect the `role` claim in the JWT and reject it.
      */
-    const response = await parentPage.request.post(`${API_BASE}/subjects`, {
-      data: {
+    const response = await fetch(`${API_BASE}/subjects`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         name: uniqueSubjectName('Chimie Forbidden'),
         education_level: 'middle',
         has_thesis: false,
-      },
+      }),
     });
 
     /**
@@ -318,9 +371,9 @@ test.describe('subject management', () => {
      * not working as expected — a serious access-control bug.
      */
     expect(
-      response.status(),
+      response.status,
       `Expected 403 Forbidden for a parent calling POST /api/v1/subjects, ` +
-        `but got ${String(response.status())}. ` +
+        `but got ${String(response.status)}. ` +
         'This is an access-control failure — the parent role must be rejected.',
     ).toBe(403);
   });
@@ -340,16 +393,23 @@ test.describe('subject management', () => {
   //   - The response body is a JSON object (not an empty body or HTML error page).
   // ───────────────────────────────────────────────────────────────────────────
   test('82 – POST /subjects without name returns 400 Bad Request', async ({ adminPage }) => {
+    const token = await getAccessToken(adminPage);
+
     /**
      * Send a payload that is missing the required "name" field.
      * education_level is present and valid — so the only issue is the missing name.
      */
-    const response = await adminPage.request.post(`${API_BASE}/subjects`, {
-      data: {
+    const response = await fetch(`${API_BASE}/subjects`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         // "name" intentionally omitted
         education_level: 'primary',
         has_thesis: false,
-      },
+      }),
     });
 
     /**
@@ -361,9 +421,9 @@ test.describe('subject management', () => {
      * Both are bugs — only 400 is correct.
      */
     expect(
-      response.status(),
+      response.status,
       `Expected 400 Bad Request for missing "name" field, ` +
-        `but got ${String(response.status())}. ` +
+        `but got ${String(response.status)}. ` +
         'The handler must validate required fields before inserting into the DB.',
     ).toBe(400);
 

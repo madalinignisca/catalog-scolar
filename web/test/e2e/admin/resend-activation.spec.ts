@@ -34,8 +34,8 @@
  * APPROACH: API-BASED TESTING
  * ───────────────────────────
  * There is no frontend UI for this endpoint yet. We call the API directly
- * using Playwright's `page.request` API, which automatically sends the
- * httpOnly auth cookies from the browser context (no manual token extraction).
+ * from the test (Node.js) using `fetch()` (Node 18+), with a JWT access token
+ * extracted from localStorage after the auth fixture completes login.
  *
  * SEED DATA REFERENCES
  * ─────────────────────
@@ -62,6 +62,34 @@ import { test, expect } from '../fixtures/auth.fixture';
  * Mirrors the constant in user-provisioning.spec.ts.
  */
 const API_BASE = 'http://localhost:8080/api/v1';
+
+// ── Helper: extract the access token from the authenticated browser ────────────
+
+/**
+ * getAccessToken
+ *
+ * Reads the JWT access token that the auth fixture stored in localStorage after
+ * a successful login + MFA flow.
+ *
+ * NOTE: `page.evaluate()` runs inside the browser process where localStorage
+ * lives. The result is sent back to Node.js as a plain value.
+ *
+ * @param page - A Playwright Page that has already been authenticated.
+ * @returns The JWT access token string.
+ * @throws If the token is missing (means the auth fixture failed).
+ */
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
+
+  if (token === null || token === '') {
+    throw new Error(
+      'catalogro_access_token not found in localStorage. ' +
+        'Did the auth fixture complete login successfully?',
+    );
+  }
+
+  return token;
+}
 
 // ── Helper: generate a unique email address ────────────────────────────────────
 
@@ -140,31 +168,38 @@ test.describe('resend activation', () => {
     secretaryPage,
   }) => {
     /**
-     * Step 1: Provision a fresh pending user via POST /api/v1/users.
-     *
-     * We use Playwright's page.request API which automatically sends the
-     * httpOnly auth cookies from the browser context (set during login).
-     * No manual token extraction needed.
+     * Step 1: Retrieve the secretary's access token from the authenticated
+     * browser session. The auth fixture already completed login + MFA.
+     */
+    const token = await getAccessToken(secretaryPage);
+
+    /**
+     * Step 2: Provision a fresh pending user via POST /api/v1/users.
      *
      * We create the user here (rather than relying on a seeded pending user)
      * so the test is self-contained — no dependency on DB state from other tests.
      *
      * uniqueEmail() prevents duplicate-email constraint violations on reruns.
      */
-    const provisionResponse = await secretaryPage.request.post(`${API_BASE}/users`, {
-      data: {
+    const provisionResponse = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         email: uniqueEmail('resend.pending'),
         first_name: 'Resend',
         last_name: 'TestParent',
         role: 'parent',
-      },
+      }),
     });
 
     // The provisioning step must succeed (201) before we can test resend.
     // If it fails, the test is aborted here with a clear error message.
     expect(
-      provisionResponse.status(),
-      `Provisioning step failed: expected 201 but got ${String(provisionResponse.status())}. ` +
+      provisionResponse.status,
+      `Provisioning step failed: expected 201 but got ${String(provisionResponse.status)}. ` +
         'Cannot proceed with resend-activation test without a pending user.',
     ).toBe(201);
 
@@ -172,31 +207,34 @@ test.describe('resend activation', () => {
     const pendingUserId: string = provisionBody.data.id;
 
     /**
-     * Step 2: Call POST /users/{id}/resend-activation.
+     * Step 3: Call POST /users/{id}/resend-activation.
      *
      * This is the endpoint under test. We pass the pending user's UUID in the
      * path so the handler knows which user to update.
      *
      * No JSON body is required — the token is generated server-side.
      */
-    const resendResponse = await secretaryPage.request.post(
-      `${API_BASE}/users/${pendingUserId}/resend-activation`,
-    );
+    const resendResponse = await fetch(`${API_BASE}/users/${pendingUserId}/resend-activation`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     /**
-     * Step 3: Assert HTTP 200 OK.
+     * Step 4: Assert HTTP 200 OK.
      *
      * 200 (not 201) because we are updating an existing resource (the pending
      * user's activation_token), not creating a new one.
      */
     expect(
-      resendResponse.status(),
-      `Expected 200 OK from resend-activation but got ${String(resendResponse.status())}. ` +
+      resendResponse.status,
+      `Expected 200 OK from resend-activation but got ${String(resendResponse.status)}. ` +
         'Check that the secretary role is authorised and the user is still pending.',
     ).toBe(200);
 
     /**
-     * Step 4: Parse and assert the response body.
+     * Step 5: Parse and assert the response body.
      */
     const body = (await resendResponse.json()) as ResendActivationResponse;
 
@@ -245,26 +283,36 @@ test.describe('resend activation', () => {
   test('B – returns new activation_token (64-char hex) and matching activation_url', async ({
     secretaryPage,
   }) => {
+    const token = await getAccessToken(secretaryPage);
+
     // Provision a new pending user for this test.
-    const provisionResponse = await secretaryPage.request.post(`${API_BASE}/users`, {
-      data: {
+    const provisionResponse = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
         email: uniqueEmail('resend.token.check'),
         first_name: 'Token',
         last_name: 'Checker',
         role: 'parent',
-      },
+      }),
     });
-    expect(provisionResponse.status()).toBe(201);
+    expect(provisionResponse.status).toBe(201);
 
     const provisionBody = (await provisionResponse.json()) as CreateUserResponse;
     const pendingUserId: string = provisionBody.data.id;
     const originalToken: string = provisionBody.data.activation_token;
 
     // Call resend-activation to get a fresh token.
-    const resendResponse = await secretaryPage.request.post(
-      `${API_BASE}/users/${pendingUserId}/resend-activation`,
-    );
-    expect(resendResponse.status()).toBe(200);
+    const resendResponse = await fetch(`${API_BASE}/users/${pendingUserId}/resend-activation`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    expect(resendResponse.status).toBe(200);
 
     const body = (await resendResponse.json()) as ResendActivationResponse;
     const newToken: string = body.data.activation_token;
@@ -334,26 +382,38 @@ test.describe('resend activation', () => {
      * userId to target. (We still expect 403 regardless of the userId, but
      * using a real UUID avoids accidentally testing the UUID validation path.)
      */
-    const provisionResponse = await secretaryPage.request.post(`${API_BASE}/users`, {
-      data: {
+    const secretaryToken = await getAccessToken(secretaryPage);
+
+    const provisionResponse = await fetch(`${API_BASE}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${secretaryToken}`,
+      },
+      body: JSON.stringify({
         email: uniqueEmail('resend.parent.forbidden'),
         first_name: 'Forbidden',
         last_name: 'Target',
         role: 'student',
-      },
+      }),
     });
-    expect(provisionResponse.status()).toBe(201);
+    expect(provisionResponse.status).toBe(201);
 
     const provisionBody = (await provisionResponse.json()) as CreateUserResponse;
     const pendingUserId: string = provisionBody.data.id;
 
     /**
      * Step 2: Attempt resend-activation as the parent (Ion Moldovan).
-     * The parent has a valid JWT (cookie) but the wrong role.
+     * The parent has a valid JWT but the wrong role.
      */
-    const resendResponse = await parentPage.request.post(
-      `${API_BASE}/users/${pendingUserId}/resend-activation`,
-    );
+    const parentToken = await getAccessToken(parentPage);
+
+    const resendResponse = await fetch(`${API_BASE}/users/${pendingUserId}/resend-activation`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${parentToken}`,
+      },
+    });
 
     /**
      * Step 3: Assert 403 Forbidden.
@@ -362,8 +422,8 @@ test.describe('resend activation', () => {
      * before the handler body runs.
      */
     expect(
-      resendResponse.status(),
-      `Expected 403 Forbidden for parent role, but got ${String(resendResponse.status())}. ` +
+      resendResponse.status,
+      `Expected 403 Forbidden for parent role, but got ${String(resendResponse.status)}. ` +
         'RequireRole middleware must block parent access to resend-activation.',
     ).toBe(403);
 

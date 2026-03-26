@@ -35,7 +35,7 @@
  * from Node.js using the global fetch() available in Node 18+.
  *
  * Both endpoints are protected (require a valid JWT Bearer token). We extract
- * page.request which includes httpOnly auth cookies after the teacherPage fixture
+ * the token from localStorage via page.evaluate() after the teacherPage fixture
  * has completed login.
  *
  * NOTE ON TEST ISOLATION
@@ -80,6 +80,30 @@ import { generateTOTP } from '../helpers/totp';
  * API base URL — must match the Go server's listen address.
  */
 const API_BASE = 'http://localhost:8080/api/v1';
+
+// ── Helper: extract the access token from the authenticated browser ────────────
+
+/**
+ * getAccessToken
+ *
+ * Reads the JWT access token stored in localStorage by the auth fixture.
+ *
+ * @param page - A Playwright Page that is already authenticated.
+ * @returns The JWT access token string, or throws if it is missing.
+ */
+async function getAccessToken(page: import('@playwright/test').Page): Promise<string> {
+  const token = await page.evaluate(() => localStorage.getItem('catalogro_access_token'));
+
+  if (token === null || token === '') {
+    throw new Error(
+      'catalogro_access_token not found in localStorage. ' +
+        'Did the auth fixture complete login successfully?',
+    );
+  }
+
+  return token;
+}
+
 // ── Helper types ───────────────────────────────────────────────────────────────
 
 /**
@@ -149,10 +173,22 @@ test.describe('2FA setup flow', () => {
   // ───────────────────────────────────────────────────────────────────────────
   test('102 – teacher receives secret and otpauth URL from setup', async ({ teacherPage }) => {
     /**
-     * Step 1: Call POST /api/v1/auth/2fa/setup.
+     * Step 1: Get the teacher's JWT access token from localStorage.
+     * The teacherPage fixture logged in as Ana Dumitrescu before this test ran.
+     */
+    const token = await getAccessToken(teacherPage);
+
+    /**
+     * Step 2: Call POST /api/v1/auth/2fa/setup.
      * No request body is needed — the server derives the account name from the JWT.
      */
-    const response = await teacherPage.request.post(`${API_BASE}/auth/2fa/setup`);
+    const response = await fetch(`${API_BASE}/auth/2fa/setup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     /**
      * Step 3: Assert HTTP 200 OK.
@@ -161,8 +197,8 @@ test.describe('2FA setup flow', () => {
      * A 500 here likely means the TOTP library failed to generate a key.
      */
     expect(
-      response.status(),
-      `Expected 200 OK from POST /auth/2fa/setup, got ${String(response.status())}. ` +
+      response.status,
+      `Expected 200 OK from POST /auth/2fa/setup, got ${String(response.status)}. ` +
         'Check that the route is wired (not notImplemented) and the JWT is valid.',
     ).toBe(200);
 
@@ -207,16 +243,24 @@ test.describe('2FA setup flow', () => {
   //   - response.data.enabled is true.
   // ───────────────────────────────────────────────────────────────────────────
   test('103 – teacher can verify with a valid TOTP code', async ({ teacherPage }) => {
+    const token = await getAccessToken(teacherPage);
+
     /**
      * Step 1: Generate a new TOTP secret via /setup.
      * We call /setup fresh here rather than reusing Test 102's result to keep
      * this test fully self-contained.
      */
-    const setupResponse = await teacherPage.request.post(`${API_BASE}/auth/2fa/setup`);
+    const setupResponse = await fetch(`${API_BASE}/auth/2fa/setup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     expect(
-      setupResponse.status(),
-      `Setup prerequisite failed: expected 200, got ${String(setupResponse.status())}.`,
+      setupResponse.status,
+      `Setup prerequisite failed: expected 200, got ${String(setupResponse.status)}.`,
     ).toBe(200);
 
     const setupBody = (await setupResponse.json()) as SetupResponse;
@@ -238,8 +282,13 @@ test.describe('2FA setup flow', () => {
     /**
      * Step 3: Call POST /api/v1/auth/2fa/verify with the secret + code.
      */
-    const verifyResponse = await teacherPage.request.post(`${API_BASE}/auth/2fa/verify`, {
-      data: { secret, code },
+    const verifyResponse = await fetch(`${API_BASE}/auth/2fa/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ secret, code }),
     });
 
     /**
@@ -250,8 +299,8 @@ test.describe('2FA setup flow', () => {
      * A 500 means the DB update failed.
      */
     expect(
-      verifyResponse.status(),
-      `Expected 200 OK from POST /auth/2fa/verify, got ${String(verifyResponse.status())}. ` +
+      verifyResponse.status,
+      `Expected 200 OK from POST /auth/2fa/verify, got ${String(verifyResponse.status)}. ` +
         'Ensure the TOTP code was generated from the correct secret ' +
         'and that both client and server clocks are in sync.',
     ).toBe(200);
@@ -288,16 +337,24 @@ test.describe('2FA setup flow', () => {
   //   - response.error.message is a non-empty string.
   // ───────────────────────────────────────────────────────────────────────────
   test('104 – invalid code returns 400 INVALID_CODE', async ({ teacherPage }) => {
+    const token = await getAccessToken(teacherPage);
+
     /**
      * Step 1: Get a fresh TOTP secret from /setup.
      * We still need the correct secret to ensure the request is well-formed —
      * we want to test that the *code* is wrong, not that the *request* is malformed.
      */
-    const setupResponse = await teacherPage.request.post(`${API_BASE}/auth/2fa/setup`);
+    const setupResponse = await fetch(`${API_BASE}/auth/2fa/setup`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
     expect(
-      setupResponse.status(),
-      `Setup prerequisite failed: expected 200, got ${String(setupResponse.status())}.`,
+      setupResponse.status,
+      `Setup prerequisite failed: expected 200, got ${String(setupResponse.status)}.`,
     ).toBe(200);
 
     const setupBody = (await setupResponse.json()) as SetupResponse;
@@ -307,8 +364,13 @@ test.describe('2FA setup flow', () => {
      * Step 2: Send the correct secret with a deliberately wrong code.
      * "000000" is a static invalid TOTP code.
      */
-    const verifyResponse = await teacherPage.request.post(`${API_BASE}/auth/2fa/verify`, {
-      data: { secret, code: '000000' },
+    const verifyResponse = await fetch(`${API_BASE}/auth/2fa/verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ secret, code: '000000' }),
     });
 
     /**
@@ -318,9 +380,9 @@ test.describe('2FA setup flow', () => {
      * A 500 would indicate the server crashed instead of handling the invalid code gracefully.
      */
     expect(
-      verifyResponse.status(),
+      verifyResponse.status,
       `Expected 400 Bad Request for an invalid TOTP code, ` +
-        `got ${String(verifyResponse.status())}. ` +
+        `got ${String(verifyResponse.status)}. ` +
         'The server must reject wrong codes, not accept or crash on them.',
     ).toBe(400);
 
