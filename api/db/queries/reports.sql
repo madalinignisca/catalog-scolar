@@ -11,7 +11,9 @@ SELECT
     (SELECT COUNT(*) FROM users WHERE role = 'student' AND is_active = true) AS total_students,
     (SELECT COUNT(*) FROM users WHERE role = 'teacher' AND is_active = true) AS total_teachers,
     (SELECT COUNT(*) FROM classes WHERE school_year_id = $1) AS total_classes,
-    (SELECT COUNT(*) FROM users WHERE role IN ('student', 'parent') AND activation_token IS NOT NULL AND is_active = false) AS pending_activations;
+    -- Pending activations: users who have been provisioned but have not yet
+    -- activated their account (set password). Matches ListPendingActivations query.
+    (SELECT COUNT(*) FROM users WHERE activated_at IS NULL AND is_active = true) AS pending_activations;
 
 -- name: DashboardClassSummaries :many
 -- Returns per-class summary stats for the dashboard.
@@ -79,6 +81,7 @@ SELECT g.subject_id, s.name AS subject_name,
     ROUND(AVG(g.numeric_grade) FILTER (WHERE g.numeric_grade IS NOT NULL AND g.is_thesis = false), 2) AS avg_grade,
     MIN(g.numeric_grade) FILTER (WHERE g.numeric_grade IS NOT NULL AND g.is_thesis = false) AS min_grade,
     MAX(g.numeric_grade) FILTER (WHERE g.numeric_grade IS NOT NULL AND g.is_thesis = false) AS max_grade,
+    -- Grade 5 is the legal passing threshold in Romania (nota de trecere = 5).
     COUNT(*) FILTER (WHERE g.numeric_grade IS NOT NULL AND g.numeric_grade < 5 AND g.is_thesis = false) AS below_five_count
 FROM grades g
 JOIN subjects s ON s.id = g.subject_id

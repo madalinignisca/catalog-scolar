@@ -60,9 +60,15 @@ func NewHandler(queries *generated.Queries, logger *slog.Logger) *Handler {
 //   - 403 Forbidden: not an admin
 //   - 500 Internal Server Error: database failure
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
-	_, err := auth.GetUserRole(r.Context())
+	role, err := auth.GetUserRole(r.Context())
 	if err != nil {
 		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Only admins and secretaries can see school-wide dashboard statistics.
+	if role != "admin" && role != "secretary" {
+		httputil.Forbidden(w, "Only admins and secretaries can access the dashboard")
 		return
 	}
 
@@ -141,7 +147,13 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 //   - 401 Unauthorized: auth context missing
 //   - 500 Internal Server Error: database failure
 func (h *Handler) StudentReport(w http.ResponseWriter, r *http.Request) {
-	_, err := auth.GetSchoolID(r.Context())
+	userID, err := auth.GetUserID(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	role, err := auth.GetUserRole(r.Context())
 	if err != nil {
 		httputil.Unauthorized(w, "Authentication required")
 		return
@@ -157,6 +169,44 @@ func (h *Handler) StudentReport(w http.ResponseWriter, r *http.Request) {
 	studentID, err := uuid.Parse(chi.URLParam(r, "studentId"))
 	if err != nil {
 		httputil.BadRequest(w, "INVALID_ID", "studentId must be a valid UUID")
+		return
+	}
+
+	// Authorization: only admin, secretary, the student themselves, or their
+	// parent can view a student report. Teachers see reports via class stats.
+	switch role {
+	case "admin", "secretary":
+		// Full access within the tenant — no further check needed.
+	case "student":
+		// Students can only view their own report.
+		if userID != studentID {
+			httputil.Forbidden(w, "Students can only view their own report")
+			return
+		}
+	case "parent":
+		// Parents can only view their linked children's reports.
+		// For now, we check if the parent has any children matching the student.
+		children, err := queries.ListChildrenForParent(r.Context(), userID)
+		if err != nil {
+			h.logger.Error("failed to list parent children", "error", err)
+			httputil.InternalError(w)
+			return
+		}
+		found := false
+		for i := range children {
+			if children[i].ID == studentID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			httputil.Forbidden(w, "Parents can only view their own children's reports")
+			return
+		}
+	default:
+		// Teachers and other roles cannot access individual student reports
+		// through this endpoint (they use class stats instead).
+		httputil.Forbidden(w, "You do not have permission to view this student report")
 		return
 	}
 
@@ -283,9 +333,13 @@ func (h *Handler) StudentReport(w http.ResponseWriter, r *http.Request) {
 			entry.Semester = &s
 		}
 		if averages[i].FinalValue.Valid {
-			if f, err := averages[i].FinalValue.Float64Value(); err == nil {
-				entry.FinalValue = &f.Float64
+			f, fErr := averages[i].FinalValue.Float64Value()
+			if fErr != nil {
+				h.logger.Error("failed to convert final value", "error", fErr)
+				httputil.InternalError(w)
+				return
 			}
+			entry.FinalValue = &f.Float64
 		}
 		if averages[i].QualifierFinal.Valid {
 			s := string(averages[i].QualifierFinal.Qualifier)
@@ -333,6 +387,19 @@ func (h *Handler) ClassStats(w http.ResponseWriter, r *http.Request) {
 	_, err := auth.GetSchoolID(r.Context())
 	if err != nil {
 		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	role, err := auth.GetUserRole(r.Context())
+	if err != nil {
+		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Only admin, secretary, and teachers can view class statistics.
+	// Parents and students do not have access to class-level aggregates.
+	if role != "admin" && role != "secretary" && role != "teacher" {
+		httputil.Forbidden(w, "Only staff can access class statistics")
 		return
 	}
 
@@ -390,15 +457,24 @@ func (h *Handler) ClassStats(w http.ResponseWriter, r *http.Request) {
 			"grade_count":      gradeStats[i].GradeCount,
 			"below_five_count": gradeStats[i].BelowFiveCount,
 		}
-		// Convert pgtype.Numeric avg_grade.
+		// Convert pgtype.Numeric avg_grade to float64 for consistent JSON output.
 		if gradeStats[i].AvgGrade.Valid {
-			if f, fErr := gradeStats[i].AvgGrade.Float64Value(); fErr == nil {
-				entry["avg_grade"] = f.Float64
+			f, fErr := gradeStats[i].AvgGrade.Float64Value()
+			if fErr != nil {
+				h.logger.Error("failed to convert avg_grade", "error", fErr,
+					"subject_id", gradeStats[i].SubjectID)
+				httputil.InternalError(w)
+				return
 			}
+			entry["avg_grade"] = f.Float64
 		}
-		// min/max come as interface{} from the FILTER aggregate.
-		entry["min_grade"] = gradeStats[i].MinGrade
-		entry["max_grade"] = gradeStats[i].MaxGrade
+		// Convert min/max from interface{} to int for consistent JSON output.
+		if v, ok := gradeStats[i].MinGrade.(int64); ok {
+			entry["min_grade"] = v
+		}
+		if v, ok := gradeStats[i].MaxGrade.(int64); ok {
+			entry["max_grade"] = v
+		}
 		subjects = append(subjects, entry)
 	}
 
