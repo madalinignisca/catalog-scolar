@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -279,10 +280,20 @@ func (h *Handler) CreateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5: Validate the content — it must not be empty.
+	// Step 5: Validate the content — it must not be empty or whitespace-only.
 	// Descriptive evaluations are free-text but cannot be blank.
+	req.Content = strings.TrimSpace(req.Content)
 	if req.Content == "" {
 		httputil.BadRequest(w, "MISSING_FIELD", "content is required and cannot be empty")
+		return
+	}
+
+	// Cap content at 10,000 characters. A typical descriptive evaluation for a
+	// primary school student is 200-500 characters. 10k is generous but prevents
+	// accidental or malicious megabyte-sized payloads.
+	const maxContentLen = 10_000
+	if len(req.Content) > maxContentLen {
+		httputil.BadRequest(w, "CONTENT_TOO_LONG", "content must be at most 10,000 characters")
 		return
 	}
 
@@ -403,9 +414,16 @@ func (h *Handler) UpdateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Validate the content — it must not be empty.
+	// Step 4: Validate the content — trim whitespace and check not empty.
+	req.Content = strings.TrimSpace(req.Content)
 	if req.Content == "" {
 		httputil.BadRequest(w, "MISSING_FIELD", "content is required and cannot be empty")
+		return
+	}
+
+	const maxContentLen = 10_000
+	if len(req.Content) > maxContentLen {
+		httputil.BadRequest(w, "CONTENT_TOO_LONG", "content must be at most 10,000 characters")
 		return
 	}
 
@@ -415,7 +433,7 @@ func (h *Handler) UpdateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5b: Fetch the existing evaluation to verify it exists and check ownership.
+	// Step 6: Fetch the existing evaluation to verify it exists and check ownership.
 	existing, err := queries.GetDescriptiveEvaluation(r.Context(), evalID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -427,7 +445,7 @@ func (h *Handler) UpdateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5c: If the user is a teacher (not admin), verify they own this evaluation.
+	// If the user is a teacher (not admin), verify they own this evaluation.
 	if role == "teacher" && existing.TeacherID != userID {
 		httputil.Forbidden(w, "Only the teacher who created this evaluation can update it")
 		return
@@ -507,7 +525,7 @@ func (h *Handler) DeleteEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3b: Fetch the existing evaluation to verify it exists and check ownership.
+	// Step 4: Fetch the existing evaluation to verify it exists and check ownership.
 	existing, err := queries.GetDescriptiveEvaluation(r.Context(), evalID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -519,7 +537,7 @@ func (h *Handler) DeleteEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3c: If the user is a teacher (not admin), verify they own this evaluation.
+	// If the user is a teacher (not admin), verify they own this evaluation.
 	if role == "teacher" && existing.TeacherID != userID {
 		httputil.Forbidden(w, "Only the teacher who created this evaluation can delete it")
 		return
