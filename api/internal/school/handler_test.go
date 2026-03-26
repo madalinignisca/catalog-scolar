@@ -1837,19 +1837,6 @@ func getSchoolYearRequest(t *testing.T) *http.Request {
 	return httptest.NewRequest(http.MethodGet, "/schools/current/year", http.NoBody)
 }
 
-// decodeSchoolYearData decodes the standard { "data": {...} } API envelope
-// returned by GET /schools/current/year and returns the inner data map.
-func decodeSchoolYearData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
-	t.Helper()
-
-	var env struct {
-		Data map[string]any `json:"data"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
-		t.Fatalf("decodeSchoolYearData: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
-	}
-	return env.Data
-}
 
 // ---------------------------------------------------------------------------
 // Test: GetCurrentYear — success (GET /schools/current/year)
@@ -1910,59 +1897,54 @@ func TestGetCurrentYear_Success(t *testing.T) {
 	}
 
 	// -----------------------------------------------------------------------
-	// 5. Decode and assert the response body.
+	// 5. Decode and assert the response body using a typed struct.
 	// -----------------------------------------------------------------------
-	data := decodeSchoolYearData(t, rr)
-
-	// id must be a non-empty UUID string.
-	// We do not assert the exact UUID value here because deterministicID is
-	// an internal testutil detail — we only care that it is a valid UUID.
-	yearID, ok := data["id"].(string)
-	if !ok || yearID == "" {
-		t.Errorf("GetCurrentYear: expected non-empty 'id' field, got: %v", data["id"])
+	// Using a typed struct instead of map[string]any avoids unsafe type
+	// assertions that silently return zero values on type mismatch.
+	var decoded struct {
+		Data struct {
+			ID        string `json:"id"`
+			Label     string `json:"label"`
+			StartDate string `json:"start_date"`
+			EndDate   string `json:"end_date"`
+			Sem1Start string `json:"sem1_start"`
+			Sem1End   string `json:"sem1_end"`
+			Sem2Start string `json:"sem2_start"`
+			Sem2End   string `json:"sem2_end"`
+			IsCurrent bool   `json:"is_current"`
+		} `json:"data"`
 	}
-	if _, err := uuid.Parse(yearID); err != nil {
-		t.Errorf("GetCurrentYear: 'id' is not a valid UUID: %q", yearID)
+	if err := json.NewDecoder(rr.Body).Decode(&decoded); err != nil {
+		t.Fatalf("GetCurrentYear: failed to decode response: %v", err)
 	}
+	d := decoded.Data
 
-	// label must be "2025-2026" — the value SeedSchools inserts for school1.
-	if label, _ := data["label"].(string); label != "2025-2026" {
-		t.Errorf("GetCurrentYear: expected label='2025-2026', got %q", label)
+	if _, err := uuid.Parse(d.ID); err != nil {
+		t.Errorf("GetCurrentYear: 'id' is not a valid UUID: %q", d.ID)
 	}
-
-	// start_date must be the ISO 8601 date inserted by SeedSchools.
-	if sd, _ := data["start_date"].(string); sd != "2025-09-08" {
-		t.Errorf("GetCurrentYear: expected start_date='2025-09-08', got %q", sd)
+	if d.Label != "2025-2026" {
+		t.Errorf("GetCurrentYear: expected label='2025-2026', got %q", d.Label)
 	}
-
-	// end_date must be the ISO 8601 date inserted by SeedSchools.
-	if ed, _ := data["end_date"].(string); ed != "2026-06-19" {
-		t.Errorf("GetCurrentYear: expected end_date='2026-06-19', got %q", ed)
+	if d.StartDate != "2025-09-08" {
+		t.Errorf("GetCurrentYear: expected start_date='2025-09-08', got %q", d.StartDate)
 	}
-
-	// sem1_start must match the first-semester start date.
-	if s1s, _ := data["sem1_start"].(string); s1s != "2025-09-08" {
-		t.Errorf("GetCurrentYear: expected sem1_start='2025-09-08', got %q", s1s)
+	if d.EndDate != "2026-06-19" {
+		t.Errorf("GetCurrentYear: expected end_date='2026-06-19', got %q", d.EndDate)
 	}
-
-	// sem1_end must match the first-semester end date.
-	if s1e, _ := data["sem1_end"].(string); s1e != "2026-01-30" {
-		t.Errorf("GetCurrentYear: expected sem1_end='2026-01-30', got %q", s1e)
+	if d.Sem1Start != "2025-09-08" {
+		t.Errorf("GetCurrentYear: expected sem1_start='2025-09-08', got %q", d.Sem1Start)
 	}
-
-	// sem2_start must match the second-semester start date.
-	if s2s, _ := data["sem2_start"].(string); s2s != "2026-02-09" {
-		t.Errorf("GetCurrentYear: expected sem2_start='2026-02-09', got %q", s2s)
+	if d.Sem1End != "2026-01-30" {
+		t.Errorf("GetCurrentYear: expected sem1_end='2026-01-30', got %q", d.Sem1End)
 	}
-
-	// sem2_end must match the second-semester end date.
-	if s2e, _ := data["sem2_end"].(string); s2e != "2026-06-19" {
-		t.Errorf("GetCurrentYear: expected sem2_end='2026-06-19', got %q", s2e)
+	if d.Sem2Start != "2026-02-09" {
+		t.Errorf("GetCurrentYear: expected sem2_start='2026-02-09', got %q", d.Sem2Start)
 	}
-
-	// is_current must be true — the seed data marks this year as current.
-	if isCurrent, _ := data["is_current"].(bool); !isCurrent {
-		t.Errorf("GetCurrentYear: expected is_current=true, got %v", data["is_current"])
+	if d.Sem2End != "2026-06-19" {
+		t.Errorf("GetCurrentYear: expected sem2_end='2026-06-19', got %q", d.Sem2End)
+	}
+	if !d.IsCurrent {
+		t.Errorf("GetCurrentYear: expected is_current=true, got %v", d.IsCurrent)
 	}
 }
 
