@@ -340,8 +340,11 @@ func run() error {
 			// DELETE — soft-delete a grade (sets deleted_at, data preserved for audit).
 			r.Delete("/catalog/grades/{gradeId}", catalogHandler.DeleteGrade)
 			r.Post("/catalog/grades/sync", notImplemented)
-			r.Post("/catalog/averages/{subjectId}/close", notImplemented)
-			r.Post("/catalog/averages/{averageId}/approve", notImplemented)
+			// Semester averages
+			// POST — compute and close semester averages for a class/subject.
+			r.Post("/catalog/averages/{subjectId}/close", catalogHandler.CloseAverage)
+			// POST — admin approves a closed average.
+			r.Post("/catalog/averages/{averageId}/approve", catalogHandler.ApproveAverage)
 
 			// Absences
 			// GET — list absences for a class by date or semester+month.
