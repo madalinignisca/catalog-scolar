@@ -27,10 +27,12 @@
 package catalog
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
 	"github.com/vlahsh/catalogro/api/internal/auth"
@@ -96,14 +98,25 @@ func (h *Handler) SyncPull(w http.ResponseWriter, r *http.Request) {
 		since = parsed
 	}
 
-	// Step 4: Get the current school year.
+	// Step 4: Capture the server timestamp BEFORE running any queries.
+	// This is the watermark the client will use as "since" on the next pull.
+	// Capturing it before the reads ensures that any row updated between the
+	// queries and the response is NOT skipped on the next pull.
+	serverTimestamp := time.Now().UTC()
+
+	// Step 5: Get the current school year.
 	schoolYear, err := queries.GetCurrentSchoolYear(r.Context())
 	if err != nil {
-		httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
+		if errors.Is(err, pgx.ErrNoRows) {
+			httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
+			return
+		}
+		h.logger.Error("failed to get current school year", "error", err)
+		httputil.InternalError(w)
 		return
 	}
 
-	// Step 5: Determine which class IDs this user can access.
+	// Step 6: Determine which class IDs this user can access.
 	var classIDs []uuid.UUID
 
 	if role == "teacher" {
@@ -140,12 +153,12 @@ func (h *Handler) SyncPull(w http.ResponseWriter, r *http.Request) {
 		httputil.Success(w, map[string]any{
 			"grades":           []any{},
 			"absences":         []any{},
-			"server_timestamp": time.Now().UTC().Format(time.RFC3339),
+			"server_timestamp": serverTimestamp.Format(time.RFC3339),
 		})
 		return
 	}
 
-	// Step 6: Fetch grades modified since the given timestamp.
+	// Step 7: Fetch grades modified since the given timestamp.
 	grades, err := queries.ListGradesModifiedSince(r.Context(), generated.ListGradesModifiedSinceParams{
 		UpdatedAt: since,
 		Column2:   classIDs,
@@ -156,7 +169,7 @@ func (h *Handler) SyncPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 7: Fetch absences modified since the given timestamp.
+	// Step 8: Fetch absences modified since the given timestamp.
 	absences, err := queries.ListAbsencesModifiedSince(r.Context(), generated.ListAbsencesModifiedSinceParams{
 		UpdatedAt: since,
 		Column2:   classIDs,
@@ -167,11 +180,11 @@ func (h *Handler) SyncPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 8: Return the results with the current server timestamp.
+	// Step 9: Return the results with the pre-captured server timestamp.
 	// The client should store server_timestamp and use it as "since" next time.
 	httputil.Success(w, map[string]any{
 		"grades":           grades,
 		"absences":         absences,
-		"server_timestamp": time.Now().UTC().Format(time.RFC3339),
+		"server_timestamp": serverTimestamp.Format(time.RFC3339),
 	})
 }
