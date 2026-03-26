@@ -33,6 +33,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/catalog"
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
+	"github.com/vlahsh/catalogro/api/internal/report"
 	"github.com/vlahsh/catalogro/api/internal/school"
 	"github.com/vlahsh/catalogro/api/internal/user"
 )
@@ -105,6 +106,9 @@ func run() error {
 
 	// catalogHandler manages grades (note) and absences (absente) — the core catalog.
 	catalogHandler := catalog.NewHandler(queries, logger)
+
+	// reportHandler manages reports: dashboard stats, student report cards, class statistics.
+	reportHandler := report.NewHandler(queries, logger)
 
 	// userHandler manages user provisioning: creating accounts, listing users,
 	// and listing accounts awaiting activation. Restricted to admin and secretary
@@ -376,12 +380,17 @@ func run() error {
 			r.Post("/messages/announcements", notImplemented)
 			r.Put("/messages/{messageId}/read", notImplemented)
 
-			// Reports
+			// Reports — real-time (synchronous) endpoints
+			// GET — school-wide statistics for the admin dashboard.
+			r.Get("/reports/dashboard", reportHandler.Dashboard)
+			// GET — full student report card (fișa elevului).
+			r.Get("/reports/student/{studentId}", reportHandler.StudentReport)
+			// GET — class-level grade and absence statistics.
+			r.Get("/reports/class/{classId}/stats", reportHandler.ClassStats)
+
+			// Reports — async endpoints (require River jobs, not yet implemented)
 			r.Post("/reports/catalog-pdf", notImplemented)
 			r.Get("/reports/jobs/{jobId}", notImplemented)
-			r.Get("/reports/dashboard", notImplemented)
-			r.Get("/reports/student/{studentId}", notImplemented)
-			r.Get("/reports/class/{classId}/stats", notImplemented)
 			r.Post("/reports/isj-export", notImplemented)
 
 			// Interoperability (import/export)
