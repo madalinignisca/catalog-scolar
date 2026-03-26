@@ -1818,3 +1818,235 @@ func TestAssignTeacher_NonExistentTeacher(t *testing.T) {
 		t.Errorf("AssignTeacher (non-existent teacher): expected error code 'TEACHER_NOT_FOUND', got %q", errCode)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Helpers for school year tests
+// ---------------------------------------------------------------------------
+
+// getSchoolYearRequest builds an *http.Request for GET /schools/current/year.
+// There is no URL path parameter or request body — the tenant is taken from
+// the request context set by withTenantCtx.
+func getSchoolYearRequest(t *testing.T) *http.Request {
+	t.Helper()
+	// httptest.NewRequest creates a valid *http.Request with a background context.
+	// The target path must match the route pattern registered in main.go but
+	// when calling the handler directly (bypassing chi routing) it only affects
+	// the request URI recorded in the test recorder — not dispatch.
+	// http.NoBody is preferred over nil for GET requests — it satisfies the
+	// gocritic linter and is more semantically correct: GET has no body.
+	return httptest.NewRequest(http.MethodGet, "/schools/current/year", http.NoBody)
+}
+
+// decodeSchoolYearData decodes the standard { "data": {...} } API envelope
+// returned by GET /schools/current/year and returns the inner data map.
+func decodeSchoolYearData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decodeSchoolYearData: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
+	}
+	return env.Data
+}
+
+// ---------------------------------------------------------------------------
+// Test: GetCurrentYear — success (GET /schools/current/year)
+// ---------------------------------------------------------------------------
+
+// TestGetCurrentYear_Success verifies the happy path for GET /schools/current/year.
+//
+// Scenario:
+//   - SeedSchools creates school1 with a current school year labelled "2025-2026",
+//     running 2025-09-08 to 2026-06-19 with two semester date ranges.
+//   - A teacher authenticated to school1 calls GET /schools/current/year.
+//   - The handler must return HTTP 200 OK with a JSON body that contains:
+//     id (UUID string), label ("2025-2026"), start_date, end_date,
+//     sem1_start, sem1_end, sem2_start, sem2_end, and is_current (true).
+func TestGetCurrentYear_Success(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	// StartPostgres spins up a real PostgreSQL 17 container via testcontainers-go.
+	// TruncateAll empties every table so this test starts from a known-clean state.
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	// SeedSchools inserts two test schools, each with one current school year.
+	// We use the first school (school1ID) for this test.
+	school1ID, _ := testutil.SeedSchools(t, pool)
+
+	// SeedUsers inserts one user per role. We authenticate as a teacher here to
+	// demonstrate that the endpoint is accessible to all authenticated roles —
+	// not just admins. Any role can view the current school year.
+	users := testutil.SeedUsers(t, pool, school1ID)
+	teacherID := users["teacher"]
+
+	// -----------------------------------------------------------------------
+	// 2. Build the request and inject authentication + tenant context.
+	// -----------------------------------------------------------------------
+	req := getSchoolYearRequest(t)
+
+	// withTenantCtx begins a PostgreSQL transaction, sets the RLS tenant to
+	// school1ID, creates a transaction-scoped Queries object, and stores both
+	// the Queries and fake JWT Claims in the request context.
+	req, rollback := withTenantCtx(t, pool, req, school1ID, teacherID, "teacher")
+	defer rollback() // rolls back the transaction — keeps the test DB clean
+
+	// -----------------------------------------------------------------------
+	// 3. Call the handler directly (no HTTP server needed for unit-style tests).
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.GetCurrentYear(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 4. Assert HTTP 200 OK.
+	// -----------------------------------------------------------------------
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GetCurrentYear: expected 200 OK, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// -----------------------------------------------------------------------
+	// 5. Decode and assert the response body.
+	// -----------------------------------------------------------------------
+	data := decodeSchoolYearData(t, rr)
+
+	// id must be a non-empty UUID string.
+	// We do not assert the exact UUID value here because deterministicID is
+	// an internal testutil detail — we only care that it is a valid UUID.
+	yearID, ok := data["id"].(string)
+	if !ok || yearID == "" {
+		t.Errorf("GetCurrentYear: expected non-empty 'id' field, got: %v", data["id"])
+	}
+	if _, err := uuid.Parse(yearID); err != nil {
+		t.Errorf("GetCurrentYear: 'id' is not a valid UUID: %q", yearID)
+	}
+
+	// label must be "2025-2026" — the value SeedSchools inserts for school1.
+	if label, _ := data["label"].(string); label != "2025-2026" {
+		t.Errorf("GetCurrentYear: expected label='2025-2026', got %q", label)
+	}
+
+	// start_date must be the ISO 8601 date inserted by SeedSchools.
+	if sd, _ := data["start_date"].(string); sd != "2025-09-08" {
+		t.Errorf("GetCurrentYear: expected start_date='2025-09-08', got %q", sd)
+	}
+
+	// end_date must be the ISO 8601 date inserted by SeedSchools.
+	if ed, _ := data["end_date"].(string); ed != "2026-06-19" {
+		t.Errorf("GetCurrentYear: expected end_date='2026-06-19', got %q", ed)
+	}
+
+	// sem1_start must match the first-semester start date.
+	if s1s, _ := data["sem1_start"].(string); s1s != "2025-09-08" {
+		t.Errorf("GetCurrentYear: expected sem1_start='2025-09-08', got %q", s1s)
+	}
+
+	// sem1_end must match the first-semester end date.
+	if s1e, _ := data["sem1_end"].(string); s1e != "2026-01-30" {
+		t.Errorf("GetCurrentYear: expected sem1_end='2026-01-30', got %q", s1e)
+	}
+
+	// sem2_start must match the second-semester start date.
+	if s2s, _ := data["sem2_start"].(string); s2s != "2026-02-09" {
+		t.Errorf("GetCurrentYear: expected sem2_start='2026-02-09', got %q", s2s)
+	}
+
+	// sem2_end must match the second-semester end date.
+	if s2e, _ := data["sem2_end"].(string); s2e != "2026-06-19" {
+		t.Errorf("GetCurrentYear: expected sem2_end='2026-06-19', got %q", s2e)
+	}
+
+	// is_current must be true — the seed data marks this year as current.
+	if isCurrent, _ := data["is_current"].(bool); !isCurrent {
+		t.Errorf("GetCurrentYear: expected is_current=true, got %v", data["is_current"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Test: GetCurrentYear — no current year configured → 404 Not Found
+// ---------------------------------------------------------------------------
+
+// TestGetCurrentYear_NoCurrentYear verifies that when no school year is
+// marked as current, the handler returns HTTP 404 with a descriptive message.
+//
+// Scenario:
+//   - We seed the school (which creates a school year with is_current=true).
+//   - We then UPDATE the school year to set is_current=false, simulating a
+//     school that has not yet configured its current year.
+//   - The handler must return HTTP 404 (not 500 or 200 with empty data).
+//
+// This is an important business case: a newly provisioned school may not have
+// configured a school year yet, and the frontend should display a friendly
+// "please configure a school year" message rather than a generic error page.
+func TestGetCurrentYear_NoCurrentYear(t *testing.T) {
+	// -----------------------------------------------------------------------
+	// 1. Set up the database.
+	// -----------------------------------------------------------------------
+	pool := testutil.StartPostgres(t)
+	testutil.TruncateAll(t, pool)
+
+	school1ID, _ := testutil.SeedSchools(t, pool)
+	users := testutil.SeedUsers(t, pool, school1ID)
+	adminID := users["admin"]
+
+	// -----------------------------------------------------------------------
+	// 2. Remove the current school year flag.
+	// -----------------------------------------------------------------------
+	// SeedSchools creates school1's year with is_current=true. We simulate the
+	// "no current year" state by setting is_current=false on all of school1's rows.
+	// We use the superuser pool connection directly (RLS bypass with explicit school_id)
+	// because this is test setup, not a handler call.
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
+		`UPDATE school_years SET is_current = false WHERE school_id = $1`,
+		school1ID,
+	)
+	if err != nil {
+		t.Fatalf("TestGetCurrentYear_NoCurrentYear: deactivate school year: %v", err)
+	}
+
+	// -----------------------------------------------------------------------
+	// 3. Build the request and inject tenant context.
+	// -----------------------------------------------------------------------
+	req := getSchoolYearRequest(t)
+	req, rollback := withTenantCtx(t, pool, req, school1ID, adminID, "admin")
+	defer rollback()
+
+	// -----------------------------------------------------------------------
+	// 4. Call the handler.
+	// -----------------------------------------------------------------------
+	rr := httptest.NewRecorder()
+	h := buildSchoolHandler(pool)
+	h.GetCurrentYear(rr, req)
+
+	// -----------------------------------------------------------------------
+	// 5. Assert HTTP 404 Not Found.
+	// -----------------------------------------------------------------------
+	// The handler must distinguish between "no row found" (pgx.ErrNoRows → 404)
+	// and a real database failure (→ 500). Returning 404 here is the correct
+	// behaviour for the "not configured yet" business scenario.
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("GetCurrentYear (no year): expected 404, got %d — body: %s",
+			rr.Code, rr.Body.String())
+	}
+
+	// Also assert the error envelope so callers can surface a meaningful message.
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("GetCurrentYear (no year): decode error envelope: %v\nbody: %s",
+			err, rr.Body.String())
+	}
+	if env.Error.Code != "NOT_FOUND" {
+		t.Errorf("GetCurrentYear (no year): expected error code 'NOT_FOUND', got %q",
+			env.Error.Code)
+	}
+}
