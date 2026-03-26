@@ -1,1 +1,4 @@
 test-results/
+api/server
+node_modules/
+test-results/
