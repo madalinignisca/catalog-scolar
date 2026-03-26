@@ -353,9 +353,14 @@ func run() error {
 			r.Post("/catalog/absences/sync", notImplemented)
 
 			// Descriptive evaluations (primary)
-			r.Get("/catalog/classes/{classId}/subjects/{subjectId}/evaluations", notImplemented)
-			r.Post("/catalog/evaluations", notImplemented)
-			r.Put("/catalog/evaluations/{evalId}", notImplemented)
+			// GET — list descriptive evaluations for a class/subject/semester.
+			r.Get("/catalog/classes/{classId}/subjects/{subjectId}/evaluations", catalogHandler.ListEvaluations)
+			// POST — create a descriptive evaluation for a primary school student.
+			r.Post("/catalog/evaluations", catalogHandler.CreateEvaluation)
+			// PUT — update the content of an existing descriptive evaluation.
+			r.Put("/catalog/evaluations/{evalId}", catalogHandler.UpdateEvaluation)
+			// DELETE — delete a descriptive evaluation.
+			r.Delete("/catalog/evaluations/{evalId}", catalogHandler.DeleteEvaluation)
 
 			// Sync
 			r.Post("/sync/push", catalogHandler.SyncPush)
