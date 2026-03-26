@@ -27,7 +27,6 @@
 package interop
 
 import (
-	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -38,6 +37,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
 	"github.com/vlahsh/catalogro/api/internal/auth"
@@ -120,30 +120,25 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Read the file into memory for format detection (needs io.ReadSeeker).
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(file); err != nil {
-		httputil.BadRequest(w, "READ_ERROR", "Failed to read uploaded file")
-		return
-	}
-	reader := bytes.NewReader(buf.Bytes())
+	// The multipart.File already implements io.ReadSeeker, so we can use it
+	// directly without buffering the entire file into memory.
 
 	// Step 1: Detect the CSV format.
-	mapping, err := siiir.DetectFormat(reader)
+	mapping, err := siiir.DetectFormat(file)
 	if err != nil {
 		httputil.BadRequest(w, "UNRECOGNIZED_FORMAT",
 			fmt.Sprintf("Could not detect SIIIR format: %s", err.Error()))
 		return
 	}
 
-	// Reset reader after format detection.
-	if _, err := reader.Seek(0, 0); err != nil {
+	// Reset file reader after format detection.
+	if _, err := file.Seek(0, 0); err != nil {
 		httputil.InternalError(w)
 		return
 	}
 
 	// Step 2: Parse student rows.
-	students, err := siiir.ParseStudents(reader, mapping)
+	students, err := siiir.ParseStudents(file, mapping)
 	if err != nil {
 		httputil.BadRequest(w, "PARSE_ERROR",
 			fmt.Sprintf("Failed to parse CSV: %s", err.Error()))
@@ -182,7 +177,13 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	h.sessions[session.ID] = session
 	h.mu.Unlock()
 
-	// Step 5: Return the preview.
+	// Step 5: Return the preview (capped at 50 rows to keep response manageable).
+	const maxPreview = 50
+	preview := users
+	if len(preview) > maxPreview {
+		preview = preview[:maxPreview]
+	}
+
 	httputil.Success(w, map[string]any{
 		"import_id":      session.ID,
 		"format_version": mapping.Version,
@@ -190,7 +191,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		"valid_users":    len(users),
 		"parse_errors":   len(errors),
 		"errors":         errors,
-		"preview":        users,
+		"preview":        preview,
 	})
 }
 
@@ -226,26 +227,27 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the import session.
-	h.mu.RLock()
+	// Look up the import session and mark as confirmed atomically.
+	// Using a single Lock (not RLock then Lock) prevents two concurrent
+	// confirm requests from both passing the status check.
+	h.mu.Lock()
 	session, exists := h.sessions[importID]
-	h.mu.RUnlock()
-
 	if !exists {
+		h.mu.Unlock()
 		httputil.NotFound(w, "Import session not found — it may have expired")
 		return
 	}
-
 	if session.Status != "preview" {
+		h.mu.Unlock()
 		httputil.BadRequest(w, "INVALID_STATUS",
 			fmt.Sprintf("Import is in '%s' state, expected 'preview'", session.Status))
 		return
 	}
-
-	// Mark as in-progress.
-	h.mu.Lock()
 	session.Status = "confirmed"
 	h.mu.Unlock()
+
+	// Get the current user ID for provisioned_by tracking.
+	currentUserID, _ := auth.GetUserID(r.Context())
 
 	// Persist each mapped user.
 	imported := 0
@@ -255,11 +257,27 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 	for i := range session.Users {
 		u := &session.Users[i]
 
-		// Provision the user via sqlc (creates account + activation token).
+		// Generate a synthetic email from the SIIIR source ID to avoid
+		// UNIQUE NULLS NOT DISTINCT (school_id, email, role) collisions.
+		// Students imported from SIIIR don't have real emails yet — they
+		// set their email during account activation.
+		syntheticEmail := fmt.Sprintf("%s@siiir.import", u.SourceMapping.SourceID)
+
+		// Generate an activation token for the imported user.
+		activationToken := uuid.New().String()
+
+		// Set siiir_student_id from the source mapping for traceability.
+		siiirID := u.SourceMapping.SourceID
+
+		// Provision the user with all required fields.
 		provisionedUser, err := queries.ProvisionUser(r.Context(), generated.ProvisionUserParams{
-			FirstName: u.FirstName,
-			LastName:  u.LastName,
-			Role:      generated.UserRole(u.Role),
+			FirstName:       u.FirstName,
+			LastName:        u.LastName,
+			Role:            generated.UserRole(u.Role),
+			Email:           &syntheticEmail,
+			SiiirStudentID:  &siiirID,
+			ActivationToken: &activationToken,
+			ProvisionedBy:   pgtype.UUID{Bytes: currentUserID, Valid: true},
 		})
 		if err != nil {
 			importErrors = append(importErrors, fmt.Sprintf("%s %s: %s", u.FirstName, u.LastName, err.Error()))
@@ -396,6 +414,24 @@ func (h *Handler) ExportSIIIR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-fetch all SIIIR source mappings for users to avoid N+1 queries.
+	// This fetches all user→SIIIR mappings at once, then we look up by entity_id.
+	allMappings, err := queries.ListSourceMappingsBySystem(r.Context(), generated.ListSourceMappingsBySystemParams{
+		SourceSystem: "siiir",
+		EntityType:   "user",
+	})
+	if err != nil {
+		h.logger.Error("failed to list source mappings for export", "error", err)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Build a lookup map: user UUID → SIIIR source_id (CNP).
+	cnpByUserID := make(map[uuid.UUID]string, len(allMappings))
+	for i := range allMappings {
+		cnpByUserID[allMappings[i].EntityID] = allMappings[i].SourceID
+	}
+
 	for i := range classes {
 		students, err := queries.ListStudentsByClass(r.Context(), classes[i].ID)
 		if err != nil {
@@ -405,19 +441,8 @@ func (h *Handler) ExportSIIIR(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for j := range students {
-			// Try to find the SIIIR source mapping for this student.
-			var cnp string
-			mapping, err := queries.GetSourceMapping(r.Context(), generated.GetSourceMappingParams{
-				EntityType:   "user",
-				EntityID:     students[j].ID,
-				SourceSystem: "siiir",
-			})
-			if err == nil {
-				cnp = mapping.SourceID
-			}
-
 			row := []string{
-				cnp,
+				cnpByUserID[students[j].ID], // CNP from source mapping (empty if none)
 				students[j].LastName,
 				students[j].FirstName,
 				"", // birth_date — not stored in users table
@@ -443,9 +468,15 @@ func (h *Handler) ExportSIIIR(w http.ResponseWriter, r *http.Request) {
 // ListSourceMappings handles GET /interop/source-mappings.
 // Returns all source mappings for a given source system.
 func (h *Handler) ListSourceMappings(w http.ResponseWriter, r *http.Request) {
-	_, err := auth.GetUserRole(r.Context())
+	role, err := auth.GetUserRole(r.Context())
 	if err != nil {
 		httputil.Unauthorized(w, "Authentication required")
+		return
+	}
+
+	// Only admin and secretary can view source mappings (contain external IDs).
+	if role != "admin" && role != "secretary" {
+		httputil.Forbidden(w, "Only admins and secretaries can view source mappings")
 		return
 	}
 
