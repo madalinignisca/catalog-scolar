@@ -198,7 +198,27 @@ func (h *Handler) CloseAverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 9: Fetch all enrolled students in the class.
+	// Step 9: Guard — reject close if any averages are already approved.
+	// Once a director approves averages, they are locked. Re-closing would
+	// overwrite approved values, breaking the two-stage workflow contract.
+	hasApproved, err := queries.HasApprovedAverages(r.Context(), generated.HasApprovedAveragesParams{
+		ClassID:      req.ClassID,
+		SubjectID:    subjectID,
+		Semester:     generated.NullSemester{Semester: generated.Semester(req.Semester), Valid: true},
+		SchoolYearID: schoolYear.ID,
+	})
+	if err != nil {
+		h.logger.Error("failed to check for approved averages", "error", err)
+		httputil.InternalError(w)
+		return
+	}
+	if hasApproved {
+		httputil.BadRequest(w, "ALREADY_APPROVED",
+			"Cannot re-close averages that have already been approved. Contact the school director.")
+		return
+	}
+
+	// Step 10: Fetch all enrolled students in the class.
 	students, err := queries.ListStudentsByClass(r.Context(), req.ClassID)
 	if err != nil {
 		h.logger.Error("failed to list students", "error", err, "class_id", req.ClassID)
@@ -243,6 +263,10 @@ func (h *Handler) CloseAverage(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Upsert the average row.
+		// Note: final_value is initially set equal to computed_value.
+		// The two fields will diverge when the admin approval workflow
+		// supports adjustments (e.g., retake exam grades modifying the
+		// final but preserving the original computed value for audit).
 		dbAvg, err := queries.CreateOrUpdateAverage(r.Context(), generated.CreateOrUpdateAverageParams{
 			StudentID:    students[i].ID,
 			ClassID:      req.ClassID,

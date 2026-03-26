@@ -61,6 +61,18 @@ UPDATE averages SET
 WHERE id = $1
 RETURNING *;
 
+-- name: HasApprovedAverages :one
+-- Checks if any averages for a class/subject/semester have been approved.
+-- Returns true if at least one approved average exists, preventing re-close.
+SELECT EXISTS (
+    SELECT 1 FROM averages
+    WHERE class_id = $1
+        AND subject_id = $2
+        AND semester = $3
+        AND school_year_id = $4
+        AND approved_at IS NOT NULL
+) AS has_approved;
+
 -- name: ListGradesForAverage :many
 -- Returns all non-deleted grades for a student/subject/semester,
 -- including the is_thesis flag needed for weighted average calculation.
