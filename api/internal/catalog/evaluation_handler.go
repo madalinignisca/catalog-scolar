@@ -143,10 +143,19 @@ func (h *Handler) ListEvaluations(w http.ResponseWriter, r *http.Request) {
 		schoolYearID = sy.ID
 	}
 
-	// Step 5: Fetch descriptive evaluations from the database.
-	// The ListDescriptiveEvaluations query joins with users to get student names.
-	// Results are sorted alphabetically by student last name, then first name.
-	rows, err := queries.ListDescriptiveEvaluations(r.Context(), generated.ListDescriptiveEvaluationsParams{
+	// Step 5: Fetch ALL enrolled students for this class.
+	// We need the full student list so the response includes students who don't
+	// have an evaluation yet (evaluation: null). This is critical for the UI —
+	// teachers need to see which students still need an evaluation written.
+	students, err := queries.ListStudentsByClass(r.Context(), classID)
+	if err != nil {
+		h.logger.Error("failed to list students by class", "error", err, "class_id", classID)
+		httputil.InternalError(w)
+		return
+	}
+
+	// Step 6: Fetch existing descriptive evaluations for this class/subject/semester.
+	evals, err := queries.ListDescriptiveEvaluations(r.Context(), generated.ListDescriptiveEvaluationsParams{
 		ClassID:      classID,
 		SubjectID:    subjectID,
 		Semester:     semester,
@@ -159,30 +168,37 @@ func (h *Handler) ListEvaluations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 6: Build the response — one entry per student with their evaluation.
-	// Each evaluation is unique per student+subject+semester, so there's at most
-	// one evaluation per student (unlike grades where there can be many).
-	result := make([]studentEvaluation, 0, len(rows))
-	for i := range rows {
+	// Step 7: Build a lookup map of evaluations by student ID.
+	// This allows O(1) lookup when merging with the student list.
+	evalMap := make(map[uuid.UUID]*evaluationResponse, len(evals))
+	for i := range evals {
+		evalMap[evals[i].StudentID] = &evaluationResponse{
+			ID:        evals[i].ID,
+			StudentID: evals[i].StudentID,
+			TeacherID: evals[i].TeacherID,
+			Semester:  string(evals[i].Semester),
+			Content:   evals[i].Content,
+			CreatedAt: evals[i].CreatedAt,
+			UpdatedAt: evals[i].UpdatedAt,
+		}
+	}
+
+	// Step 8: Merge students with their evaluations.
+	// Every enrolled student appears in the result. Students without an
+	// evaluation have evaluation: null — the teacher sees who still needs one.
+	result := make([]studentEvaluation, 0, len(students))
+	for i := range students {
 		result = append(result, studentEvaluation{
 			Student: studentInfo{
-				ID:        rows[i].StudentID,
-				FirstName: rows[i].StudentFirstName,
-				LastName:  rows[i].StudentLastName,
+				ID:        students[i].ID,
+				FirstName: students[i].FirstName,
+				LastName:  students[i].LastName,
 			},
-			Evaluation: &evaluationResponse{
-				ID:        rows[i].ID,
-				StudentID: rows[i].StudentID,
-				TeacherID: rows[i].TeacherID,
-				Semester:  string(rows[i].Semester),
-				Content:   rows[i].Content,
-				CreatedAt: rows[i].CreatedAt,
-				UpdatedAt: rows[i].UpdatedAt,
-			},
+			Evaluation: evalMap[students[i].ID], // nil if no evaluation exists
 		})
 	}
 
-	// Step 7: Return the response.
+	// Step 9: Return the response.
 	httputil.Success(w, map[string]any{
 		"students": result,
 	})
@@ -270,8 +286,16 @@ func (h *Handler) CreateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 6: Authorization check — verify the teacher is assigned to this class+subject.
-	// Admins bypass this check because they may need to write evaluations on behalf of teachers.
+	// Step 6: Authorization — only admins and teachers can create evaluations.
+	// Parents, students, and secretaries must not be able to write evaluations.
+	if role != "admin" && role != "teacher" {
+		httputil.Forbidden(w, "Only teachers and admins can create descriptive evaluations")
+		return
+	}
+
+	// Step 6b: If the user is a teacher (not admin), verify they are assigned
+	// to the class+subject. Admins bypass this check because they may need to
+	// write evaluations on behalf of teachers.
 	if role == "teacher" {
 		_, err := queries.CheckTeacherClassSubject(r.Context(), generated.CheckTeacherClassSubjectParams{
 			TeacherID: userID,
@@ -385,7 +409,13 @@ func (h *Handler) UpdateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5: Fetch the existing evaluation to verify it exists and check ownership.
+	// Step 5: Authorization — only admins and teachers can update evaluations.
+	if role != "admin" && role != "teacher" {
+		httputil.Forbidden(w, "Only teachers and admins can update descriptive evaluations")
+		return
+	}
+
+	// Step 5b: Fetch the existing evaluation to verify it exists and check ownership.
 	existing, err := queries.GetDescriptiveEvaluation(r.Context(), evalID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -397,7 +427,7 @@ func (h *Handler) UpdateEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 6: Authorization — only the original teacher or an admin can update.
+	// Step 5c: If the user is a teacher (not admin), verify they own this evaluation.
 	if role == "teacher" && existing.TeacherID != userID {
 		httputil.Forbidden(w, "Only the teacher who created this evaluation can update it")
 		return
@@ -471,7 +501,13 @@ func (h *Handler) DeleteEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 3: Fetch the existing evaluation to verify it exists and check ownership.
+	// Step 3: Authorization — only admins and teachers can delete evaluations.
+	if role != "admin" && role != "teacher" {
+		httputil.Forbidden(w, "Only teachers and admins can delete descriptive evaluations")
+		return
+	}
+
+	// Step 3b: Fetch the existing evaluation to verify it exists and check ownership.
 	existing, err := queries.GetDescriptiveEvaluation(r.Context(), evalID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -483,7 +519,7 @@ func (h *Handler) DeleteEvaluation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 4: Authorization — only the original teacher or an admin can delete.
+	// Step 3c: If the user is a teacher (not admin), verify they own this evaluation.
 	if role == "teacher" && existing.TeacherID != userID {
 		httputil.Forbidden(w, "Only the teacher who created this evaluation can delete it")
 		return

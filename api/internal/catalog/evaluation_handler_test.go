@@ -209,11 +209,11 @@ func insertEvaluationDirect(
 	ctx := context.Background()
 	evalID := uuid.New()
 
-	// Look up the school year for this school.
-	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
-	school1ID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-1"))
+	// Look up the school year for this school using the exported helper.
+	schoolYearID := testutil.DeterministicID("school-year-1")
+	school1ID := testutil.DeterministicID("school-1")
 	if schoolID != school1ID {
-		schoolYearID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-2"))
+		schoolYearID = testutil.DeterministicID("school-year-2")
 	}
 
 	_, err := pool.Exec(ctx, // nosemgrep: rls-missing-tenant-context
@@ -503,9 +503,10 @@ func TestDeleteEvaluation_Success(t *testing.T) {
 // Test 7: ListEvaluations — returns created evaluations
 // ---------------------------------------------------------------------------
 
-// TestListEvaluations_ReturnsCreated verifies that after inserting a descriptive
-// evaluation, the list endpoint returns it in the response.
-func TestListEvaluations_ReturnsCreated(t *testing.T) {
+// TestListEvaluations_IncludesAllStudents verifies that the list endpoint returns
+// ALL enrolled students — those with an evaluation AND those without one.
+// Students without an evaluation should have evaluation: null in the response.
+func TestListEvaluations_IncludesAllStudents(t *testing.T) {
 	pool := testutil.StartPostgres(t)
 	testutil.TruncateAll(t, pool)
 
@@ -514,14 +515,14 @@ func TestListEvaluations_ReturnsCreated(t *testing.T) {
 	teacherID := users["teacher"]
 	primary := testutil.SeedPrimaryClass(t, pool, school1ID, teacherID)
 
-	// Insert an evaluation directly via the pool so it's committed and visible.
+	// Insert an evaluation for StudentID only — Student2ID has no evaluation.
 	evalContent := "Elevul face progrese excelente în lectură."
 	insertEvaluationDirect(t, pool, school1ID,
 		primary.StudentID, primary.ClassID, primary.SubjectID, teacherID,
 		"I", evalContent)
 
-	// List evaluations for the same class/subject/semester.
-	schoolYearID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalogro-test-school-year-1"))
+	// List evaluations for the class/subject/semester.
+	schoolYearID := testutil.DeterministicID("school-year-1")
 
 	listURL := "/catalog/classes/" + primary.ClassID.String() +
 		"/subjects/" + primary.SubjectID.String() +
@@ -544,7 +545,7 @@ func TestListEvaluations_ReturnsCreated(t *testing.T) {
 		t.Fatalf("ListEvaluations: expected 200, got %d — body: %s", listRR.Code, listRR.Body.String())
 	}
 
-	// Decode the response and check the students array.
+	// Decode the response.
 	var listEnv struct {
 		Data struct {
 			Students []struct {
@@ -562,23 +563,34 @@ func TestListEvaluations_ReturnsCreated(t *testing.T) {
 		t.Fatalf("ListEvaluations: decode response: %v", err)
 	}
 
-	// There should be at least one student with an evaluation.
-	if len(listEnv.Data.Students) == 0 {
-		t.Fatal("ListEvaluations: expected at least one student, got 0")
+	// Both students should appear in the response (2 enrolled students).
+	if len(listEnv.Data.Students) != 2 {
+		t.Fatalf("ListEvaluations: expected 2 students, got %d", len(listEnv.Data.Students))
 	}
 
-	// Find the student we created the evaluation for.
-	found := false
+	// Verify: student 1 has an evaluation, student 2 does not.
+	var foundWithEval, foundWithoutEval bool
 	for _, s := range listEnv.Data.Students {
-		if s.Student.ID == primary.StudentID.String() && s.Evaluation != nil {
-			found = true
-			if s.Evaluation.Content != evalContent {
-				t.Errorf("ListEvaluations: expected content to match, got %q", s.Evaluation.Content)
+		switch s.Student.ID {
+		case primary.StudentID.String():
+			if s.Evaluation == nil {
+				t.Error("ListEvaluations: student 1 should have an evaluation, got null")
+			} else if s.Evaluation.Content != evalContent {
+				t.Errorf("ListEvaluations: student 1 content mismatch, got %q", s.Evaluation.Content)
 			}
+			foundWithEval = true
+		case primary.Student2ID.String():
+			if s.Evaluation != nil {
+				t.Error("ListEvaluations: student 2 should have evaluation: null, got non-null")
+			}
+			foundWithoutEval = true
 		}
 	}
-	if !found {
-		t.Error("ListEvaluations: student with evaluation not found in response")
+	if !foundWithEval {
+		t.Error("ListEvaluations: student with evaluation (student 1) not found in response")
+	}
+	if !foundWithoutEval {
+		t.Error("ListEvaluations: student without evaluation (student 2) not found in response")
 	}
 }
 

@@ -32,14 +32,19 @@ ORDER BY u.last_name, u.first_name;
 SELECT * FROM descriptive_evaluations WHERE id = $1;
 
 -- name: CreateDescriptiveEvaluation :one
--- Creates a new descriptive evaluation for a primary school student.
+-- Creates or updates a descriptive evaluation for a primary school student.
+-- Uses ON CONFLICT to enforce the one-evaluation-per-student-per-subject-per-semester
+-- rule: if an evaluation already exists, the content and teacher are updated (upsert).
 -- The school_id is set automatically by current_school_id() via RLS context.
 INSERT INTO descriptive_evaluations (
     school_id, student_id, class_id, subject_id, teacher_id,
     school_year_id, semester, content
 ) VALUES (
     current_school_id(), $1, $2, $3, $4, $5, $6, $7
-) RETURNING *;
+)
+ON CONFLICT (school_id, student_id, subject_id, school_year_id, semester)
+DO UPDATE SET content = EXCLUDED.content, teacher_id = EXCLUDED.teacher_id, updated_at = now()
+RETURNING *;
 
 -- name: UpdateDescriptiveEvaluation :one
 -- Updates the content of an existing descriptive evaluation.
