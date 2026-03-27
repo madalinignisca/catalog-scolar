@@ -34,6 +34,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
 	"github.com/vlahsh/catalogro/api/internal/interop"
+	"github.com/vlahsh/catalogro/api/internal/interop/portability"
 	"github.com/vlahsh/catalogro/api/internal/interop/oneroster"
 	"github.com/vlahsh/catalogro/api/internal/report"
 	"github.com/vlahsh/catalogro/api/internal/school"
@@ -117,6 +118,9 @@ func run() error {
 
 	// oneRosterHandler serves the OneRoster 1.2 read-only API.
 	oneRosterHandler := oneroster.NewHandler(queries, logger)
+
+	// portabilityHandler manages student record export/import (EHEIF-aligned).
+	portabilityHandler := portability.NewHandler(queries, logger)
 
 	// userHandler manages user provisioning: creating accounts, listing users,
 	// and listing accounts awaiting activation. Restricted to admin and secretary
@@ -414,9 +418,11 @@ func run() error {
 			// GET — list source mappings (SIIIR ↔ internal entity IDs).
 			r.Get("/interop/source-mappings", interopHandler.ListSourceMappings)
 
-			// Interoperability — student portability (EHEIF, not yet implemented)
-			r.Post("/interop/portability/export/{studentId}", notImplemented)
-			r.Post("/interop/portability/import", notImplemented)
+			// Interoperability — student portability (EHEIF-aligned)
+			// POST — export student's complete academic record as JSON package.
+			r.Post("/interop/portability/export/{studentId}", portabilityHandler.ExportStudent)
+			// POST — import a student record package from another school.
+			r.Post("/interop/portability/import", portabilityHandler.ImportStudent)
 		})
 
 		// =====================================================================
