@@ -222,7 +222,7 @@ function gradeTooltip(grade: Grade): string {
   const year = parts[0] ?? '';
   const formattedDate = parts.length === 3 ? `${day}.${month}.${year}` : rawDate;
 
-  if (grade.description !== null && grade.description !== '') {
+  if (grade.description != null && grade.description !== '') {
     return `${formattedDate} — ${grade.description}`;
   }
   return formattedDate;
@@ -525,9 +525,9 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
                 data-testid="student-average"
                 :class="[
                   'text-sm font-semibold',
-                  student.average !== null && student.average < 5
+                  student.average != null && student.average < 5
                     ? 'text-red-600'
-                    : student.average !== null && student.average >= 9
+                    : student.average != null && student.average >= 9
                       ? 'text-green-600'
                       : 'text-gray-700',
                 ]"

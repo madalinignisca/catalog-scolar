@@ -548,7 +548,7 @@ export function useCatalog() {
    */
   function computeNumericAverage(grades: Grade[]): number | null {
     const numericGrades = grades
-      .filter((g) => g.numericGrade !== null)
+      .filter((g) => g.numericGrade != null)
       .map((g) => g.numericGrade as number);
 
     if (numericGrades.length === 0) return null;
