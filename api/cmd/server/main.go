@@ -28,12 +28,15 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"github.com/riverqueue/river"
+
 	"github.com/vlahsh/catalogro/api/db/generated"
 	"github.com/vlahsh/catalogro/api/internal/auth"
 	"github.com/vlahsh/catalogro/api/internal/catalog"
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
 	"github.com/vlahsh/catalogro/api/internal/interop"
+	"github.com/vlahsh/catalogro/api/internal/jobs"
 	"github.com/vlahsh/catalogro/api/internal/messaging"
 	"github.com/vlahsh/catalogro/api/internal/notification"
 	"github.com/vlahsh/catalogro/api/internal/interop/portability"
@@ -82,6 +85,23 @@ func run() error {
 		return fmt.Errorf("connect to redis: %w", err)
 	}
 	defer rdb.Close()
+
+	// =========================================================================
+	// River job queue — async task processing (PDF reports, notifications, etc.)
+	// =========================================================================
+	// Register all job workers, then start the River client.
+	// The client uses the same PostgreSQL pool — no separate broker needed.
+	workers := river.NewWorkers()
+	river.AddWorker(workers, &jobs.NotificationWorker{Logger: logger})
+	river.AddWorker(workers, &jobs.ReportWorker{Logger: logger})
+
+	riverClient, err := platform.SetupRiver(context.Background(), db.Pool, workers, logger)
+	if err != nil {
+		return fmt.Errorf("setup river: %w", err)
+	}
+	defer func() {
+		_ = riverClient.Stop(context.Background())
+	}()
 
 	// =========================================================================
 	// sqlc Queries — the typed database access layer
