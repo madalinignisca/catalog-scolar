@@ -170,29 +170,28 @@ function snakeToCamel(data: unknown): unknown {
 }
 
 async function tryRefreshToken(): Promise<boolean> {
-  // Client-side: use localStorage refresh token.
-  // SSR: use cookie-based refresh (API reads refresh_token from cookie).
-  const refreshToken = import.meta.client ? localStorage.getItem(REFRESH_KEY) : null;
-
-  // Build headers — SSR needs to forward cookies for cookie-based refresh.
   const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (!import.meta.client) {
+  let refreshToken: string | null = null;
+
+  if (import.meta.client) {
+    // Client-side: use refresh token from localStorage.
+    refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (refreshToken === null || refreshToken === '') {
+      return false;
+    }
+  } else {
+    // SSR: forward cookies from the incoming request. The API will use the
+    // httpOnly refresh_token cookie.
     try {
       const incoming = useRequestHeaders(['cookie']);
       if (incoming.cookie !== undefined && incoming.cookie !== '') {
         reqHeaders['Cookie'] = incoming.cookie;
       } else {
-        // No cookies in SSR request — can't refresh.
         return false;
       }
     } catch {
       return false;
     }
-  }
-
-  // If we have neither a refresh token nor cookies, can't refresh.
-  if (import.meta.client && (refreshToken === null || refreshToken === '')) {
-    return false;
   }
 
   try {
