@@ -166,13 +166,24 @@ func postSubjectJSON(t *testing.T, body any) *http.Request {
 	return req
 }
 
+// subjectResponse is a typed struct matching the POST /subjects API response.
+// Using a typed struct instead of map[string]any catches field name typos at
+// compile time and avoids runtime type assertion panics.
+type subjectResponse struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	EducationLevel string `json:"education_level"`
+	HasThesis      bool   `json:"has_thesis"`
+	ShortName      string `json:"short_name"`
+}
+
 // decodeSubjectData decodes the standard { "data": {...} } API envelope returned
-// by POST /subjects and returns the inner data map. Decoding failures abort the test.
-func decodeSubjectData(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
+// by POST /subjects into a typed struct. Decoding failures abort the test.
+func decodeSubjectData(t *testing.T, rr *httptest.ResponseRecorder) subjectResponse {
 	t.Helper()
 
 	var env struct {
-		Data map[string]any `json:"data"`
+		Data subjectResponse `json:"data"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
 		t.Fatalf("decodeSubjectData: decode JSON envelope: %v\nbody: %s", err, rr.Body.String())
@@ -286,32 +297,31 @@ func TestCreateSubject_Success(t *testing.T) {
 	data := decodeSubjectData(t, rr)
 
 	// id must be a valid UUID string.
-	subjectID, ok := data["id"].(string)
-	if !ok || subjectID == "" {
-		t.Errorf("CreateSubject: expected non-empty 'id' in response, got: %v", data["id"])
+	if data.ID == "" {
+		t.Error("CreateSubject: expected non-empty 'id' in response")
 	}
-	if _, err := uuid.Parse(subjectID); err != nil {
-		t.Errorf("CreateSubject: 'id' is not a valid UUID: %q", subjectID)
+	if _, err := uuid.Parse(data.ID); err != nil {
+		t.Errorf("CreateSubject: 'id' is not a valid UUID: %q", data.ID)
 	}
 
 	// name must match what we sent.
-	if name, _ := data["name"].(string); name != "Matematică" {
-		t.Errorf("CreateSubject: expected name='Matematică', got %q", name)
+	if data.Name != "Matematică" {
+		t.Errorf("CreateSubject: expected name='Matematică', got %q", data.Name)
 	}
 
 	// education_level must match what we sent.
-	if level, _ := data["education_level"].(string); level != "middle" {
-		t.Errorf("CreateSubject: expected education_level='middle', got %q", level)
+	if data.EducationLevel != "middle" {
+		t.Errorf("CreateSubject: expected education_level='middle', got %q", data.EducationLevel)
 	}
 
 	// has_thesis must be true (we sent true).
-	if hasThesis, _ := data["has_thesis"].(bool); !hasThesis {
-		t.Errorf("CreateSubject: expected has_thesis=true, got %v", data["has_thesis"])
+	if !data.HasThesis {
+		t.Errorf("CreateSubject: expected has_thesis=true, got %v", data.HasThesis)
 	}
 
-	// short_name must be returned. JSON unmarshals to string.
-	if sn, _ := data["short_name"].(string); sn != "MAT" {
-		t.Errorf("CreateSubject: expected short_name='MAT', got %v", data["short_name"])
+	// short_name must be returned.
+	if data.ShortName != "MAT" {
+		t.Errorf("CreateSubject: expected short_name='MAT', got %q", data.ShortName)
 	}
 }
 
