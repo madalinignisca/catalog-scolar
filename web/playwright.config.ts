@@ -132,7 +132,7 @@ export default defineConfig({
    *
    *  Phase 2 — "mutations": Tests that create/update/delete data.
    *     These run AFTER display tests, so mutations don't corrupt seed state.
-   *     Includes: grade-crud, grade-edge-cases, sync, admin tests.
+   *     Includes: grade-crud, grade-edge-cases, sync, admin, edge tests.
    *
    * The `dependencies` field ensures Phase 1 completes before Phase 2 starts.
    * Within each phase, tests run sequentially (workers: 1).
