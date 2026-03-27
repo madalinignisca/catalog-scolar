@@ -35,6 +35,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/platform"
 	"github.com/vlahsh/catalogro/api/internal/interop"
 	"github.com/vlahsh/catalogro/api/internal/messaging"
+	"github.com/vlahsh/catalogro/api/internal/notification"
 	"github.com/vlahsh/catalogro/api/internal/interop/portability"
 	"github.com/vlahsh/catalogro/api/internal/interop/oneroster"
 	"github.com/vlahsh/catalogro/api/internal/report"
@@ -119,6 +120,9 @@ func run() error {
 
 	// messagingHandler manages teacher-parent messaging and announcements.
 	messagingHandler := messaging.NewHandler(queries, logger)
+
+	// notificationHandler manages push subscription registration and status.
+	notificationHandler := notification.NewHandler(queries, logger)
 
 	// oneRosterHandler serves the OneRoster 1.2 read-only API.
 	oneRosterHandler := oneroster.NewHandler(queries, logger)
@@ -396,6 +400,11 @@ func run() error {
 			r.Post("/messages", messagingHandler.SendMessage)
 			r.Post("/messages/announcements", messagingHandler.SendAnnouncement)
 			r.Put("/messages/{messageId}/read", messagingHandler.MarkRead)
+
+			// Notifications — push subscription management
+			r.Post("/notifications/push/subscribe", notificationHandler.Subscribe)
+			r.Delete("/notifications/push/unsubscribe", notificationHandler.Unsubscribe)
+			r.Get("/notifications/push/status", notificationHandler.PushStatus)
 
 			// Reports — real-time (synchronous) endpoints
 			// GET — school-wide statistics for the admin dashboard.
