@@ -27,6 +27,7 @@
 package interop
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -38,8 +39,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
+	"github.com/vlahsh/catalogro/api/internal/jobs"
 	"github.com/vlahsh/catalogro/api/internal/auth"
 	"github.com/vlahsh/catalogro/api/internal/httputil"
 	"github.com/vlahsh/catalogro/api/internal/interop/siiir"
@@ -47,13 +51,19 @@ import (
 
 // Handler holds the dependencies needed by interop HTTP handlers.
 type Handler struct {
-	queries *generated.Queries
-	logger  *slog.Logger
+	queries     *generated.Queries
+	logger      *slog.Logger
+	riverClient RiverInserter
 
 	// importSessions stores in-progress imports by ID.
 	// In production this should be Redis-backed; in-memory is fine for MVP.
 	mu       sync.RWMutex
 	sessions map[uuid.UUID]*importSession
+}
+
+// RiverInserter is the interface for inserting River jobs. Allows mocking in tests.
+type RiverInserter interface {
+	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
 }
 
 // importSession holds the state of an in-progress SIIIR import.
@@ -67,12 +77,14 @@ type importSession struct {
 	Skipped   int               `json:"skipped"`
 }
 
-// NewHandler creates a new interop Handler.
-func NewHandler(queries *generated.Queries, logger *slog.Logger) *Handler {
+// NewHandler creates a new interop Handler. riverClient can be nil if
+// River is not available (async import will fall back to synchronous).
+func NewHandler(queries *generated.Queries, logger *slog.Logger, riverClient RiverInserter) *Handler {
 	return &Handler{
-		queries:  queries,
-		logger:   logger,
-		sessions: make(map[uuid.UUID]*importSession),
+		queries:     queries,
+		logger:      logger,
+		riverClient: riverClient,
+		sessions:    make(map[uuid.UUID]*importSession),
 	}
 }
 
@@ -248,6 +260,34 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 
 	// Get the current user ID for provisioned_by tracking.
 	currentUserID, _ := auth.GetUserID(r.Context())
+
+	// For large batches (200+ users), enqueue a River job for async processing.
+	// This prevents HTTP request timeouts on big CSV imports.
+	const asyncThreshold = 200
+	if len(session.Users) >= asyncThreshold && h.riverClient != nil {
+		_, err := h.riverClient.Insert(r.Context(), jobs.BulkImportArgs{
+			ImportID:      importID,
+			Users:         session.Users,
+			ProvisionedBy: currentUserID,
+		}, nil)
+		if err != nil {
+			h.logger.Error("failed to enqueue bulk import job", "error", err)
+			httputil.InternalError(w)
+			return
+		}
+
+		h.mu.Lock()
+		session.Status = "processing"
+		h.mu.Unlock()
+
+		httputil.Success(w, map[string]any{
+			"import_id": importID,
+			"status":    "processing",
+			"message":   "Large import queued for background processing. Poll /status for progress.",
+			"total":     len(session.Users),
+		})
+		return
+	}
 
 	// Persist each mapped user.
 	imported := 0
