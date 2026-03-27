@@ -39,11 +39,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 
 	"github.com/vlahsh/catalogro/api/db/generated"
-	"github.com/vlahsh/catalogro/api/internal/jobs"
 	"github.com/vlahsh/catalogro/api/internal/auth"
 	"github.com/vlahsh/catalogro/api/internal/httputil"
 	"github.com/vlahsh/catalogro/api/internal/interop/siiir"
@@ -265,7 +265,7 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 	// This prevents HTTP request timeouts on big CSV imports.
 	const asyncThreshold = 200
 	if len(session.Users) >= asyncThreshold && h.riverClient != nil {
-		_, err := h.riverClient.Insert(r.Context(), jobs.BulkImportArgs{
+		_, err := h.riverClient.Insert(r.Context(), bulkImportArgs{
 			ImportID:      importID,
 			Users:         session.Users,
 			ProvisionedBy: currentUserID,
@@ -289,7 +289,7 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist each mapped user.
+	// Persist each mapped user synchronously (small batch).
 	imported := 0
 	skipped := 0
 	var importErrors []string
@@ -297,19 +297,10 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 	for i := range session.Users {
 		u := &session.Users[i]
 
-		// Generate a synthetic email from the SIIIR source ID to avoid
-		// UNIQUE NULLS NOT DISTINCT (school_id, email, role) collisions.
-		// Students imported from SIIIR don't have real emails yet — they
-		// set their email during account activation.
 		syntheticEmail := fmt.Sprintf("%s@siiir.import", u.SourceMapping.SourceID)
-
-		// Generate an activation token for the imported user.
 		activationToken := uuid.New().String()
-
-		// Set siiir_student_id from the source mapping for traceability.
 		siiirID := u.SourceMapping.SourceID
 
-		// Provision the user with all required fields.
 		provisionedUser, err := queries.ProvisionUser(r.Context(), generated.ProvisionUserParams{
 			FirstName:       u.FirstName,
 			LastName:        u.LastName,
@@ -325,19 +316,14 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Create source mapping for traceability.
-		_, err = queries.UpsertSourceMapping(r.Context(), generated.UpsertSourceMappingParams{
+		// Create source mapping (non-fatal).
+		_, _ = queries.UpsertSourceMapping(r.Context(), generated.UpsertSourceMappingParams{
 			EntityType:     u.SourceMapping.EntityType,
 			EntityID:       provisionedUser.ID,
 			SourceSystem:   u.SourceMapping.SourceSystem,
 			SourceID:       u.SourceMapping.SourceID,
 			SourceMetadata: u.SourceMapping.SourceMetadata,
 		})
-		if err != nil {
-			h.logger.Warn("failed to create source mapping",
-				"user_id", provisionedUser.ID, "error", err)
-			// Non-fatal — the user was still created.
-		}
 
 		imported++
 	}
@@ -566,3 +552,16 @@ func (h *Handler) ListSourceMappings(w http.ResponseWriter, r *http.Request) {
 
 	httputil.Success(w, result)
 }
+
+// bulkImportArgs mirrors jobs.BulkImportArgs to avoid an import cycle
+// (interop → jobs → interop/siiir → interop would cycle).
+// The Kind() must match jobs.BulkImportArgs.Kind() exactly so River
+// routes the job to the correct worker.
+type bulkImportArgs struct {
+	ImportID      uuid.UUID          `json:"import_id"`
+	Users         []siiir.MappedUser `json:"users"`
+	ProvisionedBy uuid.UUID          `json:"provisioned_by"`
+}
+
+func (bulkImportArgs) Kind() string                 { return "bulk_import" }
+func (bulkImportArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{} }

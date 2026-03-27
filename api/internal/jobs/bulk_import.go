@@ -44,7 +44,18 @@ type BulkImportWorker struct {
 
 // Work provisions each user in the batch, creating source mappings for
 // traceability. Individual failures are logged but don't abort the batch.
+//
+// KNOWN LIMITATION: The import session status (in-memory in interop.Handler)
+// cannot be updated from this worker because they run in separate contexts.
+// The session will remain in "processing" state. This is tracked in issue #79
+// (Redis-backed import sessions) which will move session state to a shared
+// persistent store accessible by both the handler and the worker.
 func (w *BulkImportWorker) Work(ctx context.Context, job *river.Job[BulkImportArgs]) error {
+	// Fail fast if the provisioned_by user ID is missing.
+	if job.Args.ProvisionedBy == uuid.Nil {
+		return fmt.Errorf("bulk import job has nil ProvisionedBy (job_id: %d)", job.ID)
+	}
+
 	w.Logger.Info("processing bulk import job",
 		"import_id", job.Args.ImportID,
 		"users", len(job.Args.Users),
@@ -57,7 +68,7 @@ func (w *BulkImportWorker) Work(ctx context.Context, job *river.Job[BulkImportAr
 	for i := range job.Args.Users {
 		u := &job.Args.Users[i]
 
-		// Generate synthetic email and activation token (same as sync path).
+		// Provision the user (same logic as the sync path in ConfirmImport).
 		syntheticEmail := fmt.Sprintf("%s@siiir.import", u.SourceMapping.SourceID)
 		activationToken := uuid.New().String()
 		siiirID := u.SourceMapping.SourceID
@@ -78,18 +89,14 @@ func (w *BulkImportWorker) Work(ctx context.Context, job *river.Job[BulkImportAr
 			continue
 		}
 
-		// Create source mapping for traceability.
-		_, err = w.Queries.UpsertSourceMapping(ctx, generated.UpsertSourceMappingParams{
+		// Create source mapping for traceability (non-fatal).
+		_, _ = w.Queries.UpsertSourceMapping(ctx, generated.UpsertSourceMappingParams{
 			EntityType:     u.SourceMapping.EntityType,
 			EntityID:       provisionedUser.ID,
 			SourceSystem:   u.SourceMapping.SourceSystem,
 			SourceID:       u.SourceMapping.SourceID,
 			SourceMetadata: u.SourceMapping.SourceMetadata,
 		})
-		if err != nil {
-			w.Logger.Warn("bulk import: failed to create source mapping",
-				"user_id", provisionedUser.ID, "error", err)
-		}
 
 		imported++
 	}
