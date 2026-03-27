@@ -63,6 +63,18 @@ export default defineNuxtConfig({
     strict: true,
   },
 
+  // Proxy /api/* requests to the Go backend. This makes API calls same-origin,
+  // which means httpOnly cookies are sent automatically without cross-origin
+  // issues (SameSite, Secure flag problems in dev mode).
+  // In production, Traefik handles routing — this proxy is for development mode only.
+  nitro: {
+    routeRules: {
+      '/api/**': {
+        proxy: 'http://localhost:8080/api/**',
+      },
+    },
+  },
+
   devtools: { enabled: true },
 
   // Listen on all interfaces so the dev server is accessible from

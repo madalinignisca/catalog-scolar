@@ -7,18 +7,15 @@ const TOKEN_KEY = 'catalogro_access_token';
 const REFRESH_KEY = 'catalogro_refresh_token';
 
 function getApiBase(): string {
-  // Check for explicit override via env var first (works in both client and server).
   if (import.meta.client) {
-    const configured = useRuntimeConfig().public.apiBase;
-    // If the configured base is the default localhost and we're accessing the app
-    // from a different host (e.g., VM IP on the LAN), use the current browser hostname
-    // so the API call goes to the same machine the page was loaded from.
-    if (configured === 'http://localhost:8080/api/v1' && window.location.hostname !== 'localhost') {
-      return `http://${window.location.hostname}:8080/api/v1`;
-    }
-    return configured;
+    // Client-side: use the Nitro proxy (same-origin /api/v1).
+    // This avoids cross-origin cookie issues in dev mode.
+    // The proxy is configured in nuxt.config.ts routeRules.
+    // In production, Traefik routes /api/* directly — same result.
+    return '/api/v1';
   }
-  // Server-side: process.env is available via Node but not typed by @types/node in this project.
+  // Server-side (SSR): call the Go API directly since the Nitro proxy
+  // is for browser requests only. Override via NUXT_PUBLIC_API_BASE env var.
   const envBase = (process as unknown as { env: Record<string, string | undefined> }).env[
     'NUXT_PUBLIC_API_BASE'
   ];
