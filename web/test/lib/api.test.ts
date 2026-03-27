@@ -87,13 +87,11 @@ import { api, ApiError, setTokens } from '~/lib/api';
 
 /**
  * The API base URL that `getApiBase()` returns in the test environment.
- * It is configured via the stub in test/setup.ts:
- *   useRuntimeConfig().public.apiBase → 'http://localhost:8080/api/v1'
- *
- * We store it here so that route keys in vi.fn() mock implementations can
- * produce full URLs that exactly match what api() will request.
+ * Since import.meta.client is true in tests, getApiBase() returns the
+ * relative path '/api/v1' (same-origin proxy). Mock fetch routes must
+ * use this prefix to match the URLs that api() will request.
  */
-const API_BASE = 'http://localhost:8080/api/v1';
+const API_BASE = '/api/v1';
 
 /**
  * localStorage key names — copied from lib/api.ts (they are module-private
