@@ -153,7 +153,14 @@ type gradeMutationData struct {
 //
 // The client matches results back to its local queue using client_id.
 // A "synced" status means the grade is safely stored on the server.
-// An "error" status means the mutation failed and should be retried later.
+// An "error" status means the mutation failed — the error_code tells the
+// client whether to retry:
+//
+//   - "transient": temporary failure (DB timeout, connection issue) → retry with backoff
+//   - "validation": invalid data (bad format, out of range) → don't retry, needs user fix
+//   - "not_found": referenced entity doesn't exist → don't retry
+//   - "forbidden": authorization failure → don't retry
+//   - "conflict": duplicate or constraint violation → don't retry
 type syncMutationResult struct {
 	// ClientID is the client-assigned mutation ID (echoed back for matching).
 	ClientID uuid.UUID `json:"client_id"`
@@ -165,9 +172,17 @@ type syncMutationResult struct {
 	// create or update. Nil for delete operations.
 	ServerID *uuid.UUID `json:"server_id,omitempty"`
 
+	// ErrorCode is a machine-readable error classification for the client's
+	// retry logic. Only present when status="error".
+	ErrorCode *string `json:"error_code,omitempty"`
+
 	// ErrorMessage is a human-readable description of why the mutation failed.
 	// Only present when status="error".
 	ErrorMessage *string `json:"error_message,omitempty"`
+
+	// Retryable indicates whether the client should retry this mutation.
+	// True for transient errors (DB timeouts), false for validation/auth errors.
+	Retryable bool `json:"retryable"`
 }
 
 // syncPushResponseData is the body of the data envelope in the response.
@@ -299,12 +314,12 @@ func (h *Handler) processMutation(
 			// Unknown action for a known type — return a descriptive error.
 			// The client should not retry this because it is a logic error.
 			msg := "unsupported action '" + m.Action + "' for type 'grade'"
-			return errorResult(m.ClientID, msg)
+			return errorResult(m.ClientID, "conflict", msg, false)
 		}
 	default:
 		// Unknown mutation type — skip it gracefully.
 		msg := "unsupported mutation type '" + m.Type + "'"
-		return errorResult(m.ClientID, msg)
+		return errorResult(m.ClientID, "conflict", msg, false)
 	}
 }
 
@@ -332,7 +347,7 @@ func (h *Handler) applyGradeCreate(
 	// ── Parse the grade data payload ──────────────────────────────────────────
 	var data gradeMutationData
 	if err := json.Unmarshal(m.Data, &data); err != nil {
-		return errorResult(m.ClientID, "invalid grade data payload: "+err.Error())
+		return errorResult(m.ClientID, "validation", "invalid grade data payload: "+err.Error(), false)
 	}
 
 	// ── Idempotency check: has this client_id already been synced? ────────────
@@ -359,25 +374,25 @@ func (h *Handler) applyGradeCreate(
 	if !errors.Is(err, pgx.ErrNoRows) {
 		h.logger.Error("sync_push: failed to check grade client_id",
 			"error", err, "client_id", m.ClientID)
-		return errorResult(m.ClientID, "database error during deduplication check")
+		return errorResult(m.ClientID, "transient", "database error during deduplication check", true)
 	}
 	// pgx.ErrNoRows means no duplicate — proceed to insert.
 
 	// ── Validate semester ─────────────────────────────────────────────────────
 	if data.Semester != "I" && data.Semester != "II" {
-		return errorResult(m.ClientID, "semester must be 'I' or 'II'")
+		return errorResult(m.ClientID, "validation", "semester must be 'I' or 'II'", false)
 	}
 
 	// ── Validate grade value (exactly one of numeric or qualifier) ────────────
 	if data.NumericGrade == nil && data.QualifierGrade == nil {
-		return errorResult(m.ClientID, "either numeric_grade or qualifier_grade is required")
+		return errorResult(m.ClientID, "validation", "either numeric_grade or qualifier_grade is required", false)
 	}
 	if data.NumericGrade != nil && data.QualifierGrade != nil {
-		return errorResult(m.ClientID, "provide either numeric_grade or qualifier_grade, not both")
+		return errorResult(m.ClientID, "validation", "provide either numeric_grade or qualifier_grade, not both", false)
 	}
 	if data.NumericGrade != nil {
 		if *data.NumericGrade < 1 || *data.NumericGrade > 10 {
-			return errorResult(m.ClientID, "numeric_grade must be between 1 and 10")
+			return errorResult(m.ClientID, "validation", "numeric_grade must be between 1 and 10", false)
 		}
 	}
 
@@ -391,15 +406,15 @@ func (h *Handler) applyGradeCreate(
 				Valid:     true,
 			}
 		default:
-			return errorResult(m.ClientID,
-				"qualifier_grade must be one of: FB, B, S, I")
+			return errorResult(m.ClientID, "validation",
+				"qualifier_grade must be one of: FB, B, S, I", false)
 		}
 	}
 
 	// ── Parse grade date ──────────────────────────────────────────────────────
 	gradeDate, err := time.Parse("2006-01-02", data.GradeDate)
 	if err != nil {
-		return errorResult(m.ClientID, "grade_date must be in YYYY-MM-DD format")
+		return errorResult(m.ClientID, "validation", "grade_date must be in YYYY-MM-DD format", false)
 	}
 
 	// ── Build client timestamp for the record ─────────────────────────────────
@@ -436,7 +451,7 @@ func (h *Handler) applyGradeCreate(
 			"client_id", m.ClientID,
 			"student_id", data.StudentID,
 		)
-		return errorResult(m.ClientID, "failed to save grade to database")
+		return errorResult(m.ClientID, "transient", "failed to save grade to database", true)
 	}
 
 	// ── Return success with the new server-side UUID ──────────────────────────
@@ -468,27 +483,27 @@ func (h *Handler) applyGradeUpdate(
 	// ── Parse the grade data payload ──────────────────────────────────────────
 	var data gradeMutationData
 	if err := json.Unmarshal(m.Data, &data); err != nil {
-		return errorResult(m.ClientID, "invalid grade data payload: "+err.Error())
+		return errorResult(m.ClientID, "validation", "invalid grade data payload: "+err.Error(), false)
 	}
 
 	// ── Require server_id for update ──────────────────────────────────────────
 	// An update without a server_id is a client logic error — we cannot know
 	// which grade to update. The client should not retry this as-is.
 	if data.ServerID == nil {
-		return errorResult(m.ClientID, "server_id is required for grade update")
+		return errorResult(m.ClientID, "validation", "server_id is required for grade update", false)
 	}
 	gradeID := *data.ServerID
 
 	// ── Validate grade value ──────────────────────────────────────────────────
 	if data.NumericGrade == nil && data.QualifierGrade == nil {
-		return errorResult(m.ClientID, "either numeric_grade or qualifier_grade is required")
+		return errorResult(m.ClientID, "validation", "either numeric_grade or qualifier_grade is required", false)
 	}
 	if data.NumericGrade != nil && data.QualifierGrade != nil {
-		return errorResult(m.ClientID, "provide either numeric_grade or qualifier_grade, not both")
+		return errorResult(m.ClientID, "validation", "provide either numeric_grade or qualifier_grade, not both", false)
 	}
 	if data.NumericGrade != nil {
 		if *data.NumericGrade < 1 || *data.NumericGrade > 10 {
-			return errorResult(m.ClientID, "numeric_grade must be between 1 and 10")
+			return errorResult(m.ClientID, "validation", "numeric_grade must be between 1 and 10", false)
 		}
 	}
 
@@ -502,14 +517,14 @@ func (h *Handler) applyGradeUpdate(
 				Valid:     true,
 			}
 		default:
-			return errorResult(m.ClientID, "qualifier_grade must be one of: FB, B, S, I")
+			return errorResult(m.ClientID, "validation", "qualifier_grade must be one of: FB, B, S, I", false)
 		}
 	}
 
 	// ── Parse grade date ──────────────────────────────────────────────────────
 	gradeDate, err := time.Parse("2006-01-02", data.GradeDate)
 	if err != nil {
-		return errorResult(m.ClientID, "grade_date must be in YYYY-MM-DD format")
+		return errorResult(m.ClientID, "validation", "grade_date must be in YYYY-MM-DD format", false)
 	}
 
 	// ── Fetch the existing grade to check ownership ───────────────────────────
@@ -517,22 +532,22 @@ func (h *Handler) applyGradeUpdate(
 	// Admins bypass this check (same as UpdateGrade handler).
 	role, err := auth.GetUserRole(r.Context())
 	if err != nil {
-		return errorResult(m.ClientID, "failed to determine user role")
+		return errorResult(m.ClientID, "transient", "failed to determine user role", true)
 	}
 
 	existing, err := queries.GetGradeByID(r.Context(), gradeID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return errorResult(m.ClientID, "grade not found: "+gradeID.String())
+			return errorResult(m.ClientID, "not_found", "grade not found: "+gradeID.String(), false)
 		}
 		h.logger.Error("sync_push: failed to fetch grade for update",
 			"error", err, "grade_id", gradeID)
-		return errorResult(m.ClientID, "database error fetching grade")
+		return errorResult(m.ClientID, "transient", "database error fetching grade", true)
 	}
 
 	// ── Authorization check ───────────────────────────────────────────────────
 	if role == "teacher" && existing.TeacherID != userID {
-		return errorResult(m.ClientID, "only the teacher who created this grade can update it")
+		return errorResult(m.ClientID, "forbidden", "only the teacher who created this grade can update it", false)
 	}
 
 	// ── Apply the update ──────────────────────────────────────────────────────
@@ -545,11 +560,11 @@ func (h *Handler) applyGradeUpdate(
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return errorResult(m.ClientID, "grade not found or already deleted")
+			return errorResult(m.ClientID, "not_found", "grade not found or already deleted", false)
 		}
 		h.logger.Error("sync_push: failed to update grade",
 			"error", err, "grade_id", gradeID)
-		return errorResult(m.ClientID, "failed to update grade in database")
+		return errorResult(m.ClientID, "transient", "failed to update grade in database", true)
 	}
 
 	serverID := updated.ID
@@ -585,19 +600,19 @@ func (h *Handler) applyGradeDelete(
 	// ── Parse the grade data payload ──────────────────────────────────────────
 	var data gradeMutationData
 	if err := json.Unmarshal(m.Data, &data); err != nil {
-		return errorResult(m.ClientID, "invalid grade data payload: "+err.Error())
+		return errorResult(m.ClientID, "validation", "invalid grade data payload: "+err.Error(), false)
 	}
 
 	// ── Require server_id for delete ──────────────────────────────────────────
 	if data.ServerID == nil {
-		return errorResult(m.ClientID, "server_id is required for grade delete")
+		return errorResult(m.ClientID, "validation", "server_id is required for grade delete", false)
 	}
 	gradeID := *data.ServerID
 
 	// ── Determine role for authorization ─────────────────────────────────────
 	role, err := auth.GetUserRole(r.Context())
 	if err != nil {
-		return errorResult(m.ClientID, "failed to determine user role")
+		return errorResult(m.ClientID, "transient", "failed to determine user role", true)
 	}
 
 	// ── Fetch the existing grade to check ownership ───────────────────────────
@@ -615,19 +630,19 @@ func (h *Handler) applyGradeDelete(
 		}
 		h.logger.Error("sync_push: failed to fetch grade for delete",
 			"error", err, "grade_id", gradeID)
-		return errorResult(m.ClientID, "database error fetching grade")
+		return errorResult(m.ClientID, "transient", "database error fetching grade", true)
 	}
 
 	// ── Authorization check ───────────────────────────────────────────────────
 	if role == "teacher" && existing.TeacherID != userID {
-		return errorResult(m.ClientID, "only the teacher who created this grade can delete it")
+		return errorResult(m.ClientID, "forbidden", "only the teacher who created this grade can delete it", false)
 	}
 
 	// ── Soft-delete the grade ─────────────────────────────────────────────────
 	if err := queries.SoftDeleteGrade(r.Context(), gradeID); err != nil {
 		h.logger.Error("sync_push: failed to soft-delete grade",
 			"error", err, "grade_id", gradeID)
-		return errorResult(m.ClientID, "failed to delete grade from database")
+		return errorResult(m.ClientID, "transient", "failed to delete grade from database", true)
 	}
 
 	// Return success. server_id is set so the client can identify the record.
@@ -643,17 +658,21 @@ func (h *Handler) applyGradeDelete(
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-// errorResult builds a syncMutationResult with status="error" and the given
-// human-readable message. The message is also logged at WARN level to help
-// with support debugging without flooding ERROR logs for expected client errors.
-func errorResult(clientID uuid.UUID, message string) syncMutationResult {
+// errorResult builds a syncMutationResult with status="error".
+// code classifies the error for the client's retry logic.
+// retryable tells the client whether to retry this mutation.
+func errorResult(clientID uuid.UUID, code, message string, retryable bool) syncMutationResult {
 	slog.Warn("sync_push: mutation error",
 		"client_id", clientID,
+		"error_code", code,
 		"error", message,
+		"retryable", retryable,
 	)
 	return syncMutationResult{
 		ClientID:     clientID,
 		Status:       "error",
+		ErrorCode:    &code,
 		ErrorMessage: &message,
+		Retryable:    retryable,
 	}
 }
