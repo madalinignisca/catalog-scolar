@@ -34,6 +34,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
 	"github.com/vlahsh/catalogro/api/internal/interop"
+	"github.com/vlahsh/catalogro/api/internal/messaging"
 	"github.com/vlahsh/catalogro/api/internal/interop/portability"
 	"github.com/vlahsh/catalogro/api/internal/interop/oneroster"
 	"github.com/vlahsh/catalogro/api/internal/report"
@@ -115,6 +116,9 @@ func run() error {
 
 	// interopHandler manages SIIIR import/export and source mappings.
 	interopHandler := interop.NewHandler(queries, logger)
+
+	// messagingHandler manages teacher-parent messaging and announcements.
+	messagingHandler := messaging.NewHandler(queries, logger)
 
 	// oneRosterHandler serves the OneRoster 1.2 read-only API.
 	oneRosterHandler := oneroster.NewHandler(queries, logger)
@@ -386,12 +390,12 @@ func run() error {
 			// GET — pull server-side changes since last sync timestamp.
 			r.Get("/sync/pull", catalogHandler.SyncPull)
 
-			// Messages
-			r.Get("/messages", notImplemented)
-			r.Get("/messages/{messageId}", notImplemented)
-			r.Post("/messages", notImplemented)
-			r.Post("/messages/announcements", notImplemented)
-			r.Put("/messages/{messageId}/read", notImplemented)
+			// Messages — teacher-parent messaging and announcements
+			r.Get("/messages", messagingHandler.ListMessages)
+			r.Get("/messages/{messageId}", messagingHandler.GetMessage)
+			r.Post("/messages", messagingHandler.SendMessage)
+			r.Post("/messages/announcements", messagingHandler.SendAnnouncement)
+			r.Put("/messages/{messageId}/read", messagingHandler.MarkRead)
 
 			// Reports — real-time (synchronous) endpoints
 			// GET — school-wide statistics for the admin dashboard.
