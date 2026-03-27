@@ -172,9 +172,7 @@ function snakeToCamel(data: unknown): unknown {
 async function tryRefreshToken(): Promise<boolean> {
   // Client-side: use localStorage refresh token.
   // SSR: use cookie-based refresh (API reads refresh_token from cookie).
-  const refreshToken = import.meta.client
-    ? localStorage.getItem(REFRESH_KEY)
-    : null;
+  const refreshToken = import.meta.client ? localStorage.getItem(REFRESH_KEY) : null;
 
   // Build headers — SSR needs to forward cookies for cookie-based refresh.
   const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -202,7 +200,10 @@ async function tryRefreshToken(): Promise<boolean> {
     const response = await fetch(`${base}/auth/refresh`, {
       method: 'POST',
       headers: reqHeaders,
-      body: refreshToken !== null && refreshToken !== '' ? JSON.stringify({ refresh_token: refreshToken }) : '{}',
+      body:
+        refreshToken !== null && refreshToken !== ''
+          ? JSON.stringify({ refresh_token: refreshToken })
+          : '{}',
       credentials: 'include',
     });
 
