@@ -65,6 +65,8 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body to 4 KB to prevent memory exhaustion from oversized payloads.
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var req subscribeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")
@@ -130,6 +132,8 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit request body to 1 KB — unsubscribe only needs the endpoint URL.
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
 	var req unsubscribeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httputil.BadRequest(w, "INVALID_JSON", "Request body must be valid JSON")

@@ -94,9 +94,13 @@ func (d *Dispatcher) Send(ctx context.Context, n *Notification) {
 	}
 
 	for i := range subs {
+		logEndpoint := subs[i].Endpoint
+		if len(logEndpoint) > 50 {
+			logEndpoint = logEndpoint[:50] + "..."
+		}
 		d.logger.Debug("would send push notification",
 			"user_id", subs[i].UserID,
-			"endpoint", subs[i].Endpoint[:min(50, len(subs[i].Endpoint))]+"...",
+			"endpoint", logEndpoint,
 			"title", n.Title,
 		)
 	}
