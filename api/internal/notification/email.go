@@ -55,9 +55,28 @@ func LoadSMTPConfig() *SMTPConfig {
 		port = "587" // default SMTP submission port
 	}
 
-	tlsMode := os.Getenv("SMTP_TLS")
+	// SMTP_FROM is required when SMTP_HOST is configured — fail fast if missing.
+	from := os.Getenv("SMTP_FROM")
+	if from == "" {
+		panic("FATAL: SMTP_FROM must be set when SMTP_HOST is configured")
+	}
+
+	tlsMode := strings.ToLower(os.Getenv("SMTP_TLS"))
 	if tlsMode == "" {
 		tlsMode = "starttls" // default: STARTTLS (most common for port 587)
+	}
+
+	// Validate TLS mode — reject unknown values and block plaintext in production.
+	switch tlsMode {
+	case "starttls", "tls":
+		// Valid and secure modes.
+	case "none":
+		if os.Getenv("ENV") == "production" {
+			panic("FATAL: insecure SMTP_TLS=none is not allowed in production")
+		}
+		slog.Warn("SMTP_TLS=none — emails will be sent without encryption (development only)")
+	default:
+		panic(fmt.Sprintf("FATAL: invalid SMTP_TLS value %q; must be 'starttls', 'tls', or 'none'", tlsMode))
 	}
 
 	return &SMTPConfig{
@@ -65,23 +84,19 @@ func LoadSMTPConfig() *SMTPConfig {
 		Port:     port,
 		Username: os.Getenv("SMTP_USERNAME"),
 		Password: os.Getenv("SMTP_PASSWORD"),
-		From:     os.Getenv("SMTP_FROM"),
-		TLS:      strings.ToLower(tlsMode),
+		From:     from,
+		TLS:      tlsMode,
 	}
 }
 
 // NewSMTPSender creates an SMTP sender with the given config.
 // If config is nil, returns a no-op sender that only logs.
 func NewSMTPSender(config *SMTPConfig, logger *slog.Logger) *SMTPSender {
-	return &SMTPSender{
-		config: func() SMTPConfig {
-			if config != nil {
-				return *config
-			}
-			return SMTPConfig{}
-		}(),
-		logger: logger,
+	sender := &SMTPSender{logger: logger}
+	if config != nil {
+		sender.config = *config
 	}
+	return sender
 }
 
 // IsEnabled returns true if SMTP is configured.
