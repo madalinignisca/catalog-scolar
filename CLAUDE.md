@@ -101,8 +101,12 @@ DATABASE_URL=postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=dis
 REDIS_URL=redis://localhost:6379/0
 JWT_SECRET=<random-32-bytes-hex>
 TOTP_ENCRYPTION_KEY=<random-32-bytes-hex>
-MAILGUN_DOMAIN=mg.catalogro.ro
-MAILGUN_API_KEY=<key>
+SMTP_HOST=smtp.scoala-rebreanu.ro
+SMTP_PORT=587
+SMTP_USERNAME=catalog@scoala-rebreanu.ro
+SMTP_PASSWORD=<secret>
+SMTP_FROM=catalog@scoala-rebreanu.ro
+SMTP_TLS=starttls
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
