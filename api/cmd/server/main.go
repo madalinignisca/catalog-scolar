@@ -375,7 +375,8 @@ func run() error {
 
 			// Sync
 			r.Post("/sync/push", catalogHandler.SyncPush)
-			r.Get("/sync/pull", notImplemented)
+			// GET — pull server-side changes since last sync timestamp.
+			r.Get("/sync/pull", catalogHandler.SyncPull)
 
 			// Messages
 			r.Get("/messages", notImplemented)
