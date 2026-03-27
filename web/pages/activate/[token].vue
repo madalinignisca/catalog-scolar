@@ -158,15 +158,15 @@ const roleLabels: Record<string, string> = {
 
       <!-- Loading -->
       <div
-        data-testid="activate-loading"
         v-if="state === 'loading'"
+        data-testid="activate-loading"
         class="py-8 text-center text-gray-500"
       >
         Se verifică link-ul de activare...
       </div>
 
       <!-- Error -->
-      <div data-testid="activate-error" v-else-if="state === 'error'" class="py-8 text-center">
+      <div v-else-if="state === 'error'" data-testid="activate-error" class="py-8 text-center">
         <p class="text-red-600">
           {{ error }}
         </p>
@@ -198,9 +198,9 @@ const roleLabels: Record<string, string> = {
               >Parolă nouă</label
             >
             <input
-              data-testid="activate-password"
               id="activate-password"
               v-model="password"
+              data-testid="activate-password"
               type="password"
               required
               minlength="8"
@@ -213,9 +213,9 @@ const roleLabels: Record<string, string> = {
               >Confirmă parola</label
             >
             <input
-              data-testid="activate-password-confirm"
               id="activate-password-confirm"
               v-model="passwordConfirm"
+              data-testid="activate-password-confirm"
               type="password"
               required
               minlength="8"
@@ -228,8 +228,8 @@ const roleLabels: Record<string, string> = {
           <div v-if="userData.requiresGdpr" class="rounded-lg border border-gray-200 p-4">
             <label class="flex items-start gap-3">
               <input
-                data-testid="activate-gdpr"
                 v-model="gdprConsent"
+                data-testid="activate-gdpr"
                 type="checkbox"
                 class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
               />
@@ -303,7 +303,7 @@ const roleLabels: Record<string, string> = {
       </div>
 
       <!-- Done -->
-      <div data-testid="activate-success" v-else-if="state === 'done'" class="py-8 text-center">
+      <div v-else-if="state === 'done'" data-testid="activate-success" class="py-8 text-center">
         <div
           class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100"
         >
