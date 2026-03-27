@@ -12,7 +12,7 @@ Not every change carries the same risk. A backend-only SQL query change can't br
 
 ### Tier 1: Every PR (fast, ~2 min)
 
-**What runs:** Linting + unit/integration tests only.
+**What runs:** Linting + unit/integration tests + build.
 
 ```
 API Lint       → golangci-lint (Go code quality)
@@ -24,9 +24,11 @@ Web Build      → nuxt build (compilation + type check)
 CodeQL         → static analysis for security vulnerabilities
 ```
 
-These tests are fast, deterministic, and catch 90% of bugs. They run on every PR regardless of what changed.
+These tests are fast, deterministic, and catch 90% of bugs.
 
-### Tier 2: Post-merge to main + release branches (thorough, ~7 min)
+**Optimization — path-based skipping:** If a PR only touches `api/` files, the Web jobs are skipped. Frontend-only PRs skip Go tests. This is implemented via GitHub Actions' `paths` filter on the job level.
+
+### Tier 2: Post-merge + release branches (thorough, ~7 min)
 
 **What runs:** Everything from Tier 1 + full E2E suite.
 
@@ -37,13 +39,12 @@ E2E Test       → Playwright (25+ browser tests against real stack)
 E2E tests run:
 - **On every push to `main`** — catches integration issues after merge. If E2E fails on main, the team is notified but main isn't blocked (the individual PR tests already passed).
 - **On `release/*` branches** — mandatory gate before any release. E2E must pass before tagging.
-- **On manual trigger** — any developer can run E2E on their PR branch via `workflow_dispatch` if they suspect their change needs it.
 
-### Tier 3: Path-based skipping (smart, saves ~5 min on backend PRs)
+### Tier 3: Manual trigger (on-demand, ~7 min)
 
-If a PR only touches `api/` files (no `web/` changes), the Web Lint, Web Test, and Web Build jobs are skipped entirely. The reverse is also true — frontend-only PRs skip Go tests.
+**What runs:** Full E2E suite on any branch via `workflow_dispatch`.
 
-This is implemented via GitHub Actions' `paths` filter on the job level.
+Any developer can manually trigger E2E on their PR branch if they suspect their change needs it (e.g., touching auth flows or SSR rendering).
 
 ## Release Workflow
 
@@ -76,10 +77,12 @@ Patch releases (`v0.6.1`) for hotfixes that need immediate deployment.
 |--------|--------|-------|
 | PR CI time | ~8 min | ~2 min |
 | E2E runs/day | ~15 (every PR) | ~3 (merges + releases) |
-| CI minutes/month | ~3,600 | ~900 |
+| CI minutes/month | ~3,600 | ~1,530 |
 | Developer wait time | 8 min per push | 2 min per push |
 
-The 75% reduction in CI minutes isn't just about cost — it's about developer velocity. When CI is fast, developers push small changes often. When CI is slow, they batch changes into large PRs that are harder to review and more likely to introduce bugs.
+*Calculation: 15 PRs/day x 2 min x 30 days = 900 min (Tier 1) + 3 merges/day x 7 min x 30 days = 630 min (Tier 2) = 1,530 min total. That's a 57% reduction in CI minutes.*
+
+But the real win isn't minutes — it's developer velocity. When CI is fast, developers push small changes often. When CI is slow, they batch changes into large PRs that are harder to review and more likely to introduce bugs.
 
 ## Implementation
 
