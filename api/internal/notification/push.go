@@ -19,6 +19,7 @@ package notification
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -80,6 +81,16 @@ func (p *PushSender) IsEnabled() bool {
 	return p.config.PublicKey != ""
 }
 
+// ErrSubscriptionExpired is returned when the push service indicates the
+// subscription is no longer valid (HTTP 410 Gone or 404 Not Found).
+// The caller should delete this subscription from the database.
+var ErrSubscriptionExpired = errors.New("push subscription expired or invalid")
+
+// pushTTL is how long (seconds) the push service holds the message if the
+// device is offline. 24 hours is standard for school notifications — parents
+// may not check their phone immediately.
+const pushTTL = 86400
+
 // PushPayload is the JSON payload sent to the browser's service worker.
 // The service worker uses these fields to display the notification.
 type PushPayload struct {
@@ -120,7 +131,7 @@ func (p *PushSender) SendPush(endpoint, p256dhKey, authKey string, payload PushP
 		Subscriber:      p.config.Contact,
 		VAPIDPublicKey:  p.config.PublicKey,
 		VAPIDPrivateKey: p.config.PrivateKey,
-		TTL:             60, // seconds the push service holds the message
+		TTL:             pushTTL,
 	})
 	if err != nil {
 		return fmt.Errorf("send push to %s: %w", truncateEndpoint(endpoint), err)
@@ -131,7 +142,7 @@ func (p *PushSender) SendPush(endpoint, p256dhKey, authKey string, payload PushP
 	if resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound {
 		// Subscription is no longer valid — the browser unsubscribed or
 		// the push service removed it. Caller should delete from DB.
-		return fmt.Errorf("subscription expired (HTTP %d): %s", resp.StatusCode, truncateEndpoint(endpoint))
+		return ErrSubscriptionExpired
 	}
 
 	if resp.StatusCode >= 400 {
