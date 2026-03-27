@@ -108,86 +108,17 @@ func (h *Handler) ExportStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch the current school year for academic records.
-	schoolYear, err := queries.GetCurrentSchoolYear(r.Context())
+	// Fetch ALL school years (not just current) for complete academic history.
+	schoolYears, err := queries.ListSchoolYears(r.Context())
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No current school year is configured")
-			return
-		}
-		h.logger.Error("failed to get school year", "error", err)
+		h.logger.Error("failed to list school years", "error", err)
 		httputil.InternalError(w)
 		return
 	}
 
-	// Fetch grades for the student.
-	grades, err := queries.StudentReportGrades(r.Context(), generated.StudentReportGradesParams{
-		StudentID: studentID, SchoolYearID: schoolYear.ID,
-	})
-	if err != nil {
-		h.logger.Error("failed to get student grades", "error", err)
-		httputil.InternalError(w)
+	if len(schoolYears) == 0 {
+		httputil.BadRequest(w, "NO_SCHOOL_YEAR", "No school years configured")
 		return
-	}
-
-	// Fetch absences.
-	absences, err := queries.StudentReportAbsences(r.Context(), generated.StudentReportAbsencesParams{
-		StudentID: studentID, SchoolYearID: schoolYear.ID,
-	})
-	if err != nil {
-		h.logger.Error("failed to get student absences", "error", err)
-		httputil.InternalError(w)
-		return
-	}
-
-	// Fetch averages.
-	averages, err := queries.StudentReportAverages(r.Context(), generated.StudentReportAveragesParams{
-		StudentID: studentID, SchoolYearID: schoolYear.ID,
-	})
-	if err != nil {
-		h.logger.Error("failed to get student averages", "error", err)
-		httputil.InternalError(w)
-		return
-	}
-
-	// Fetch descriptive evaluations.
-	evals, err := queries.StudentReportEvaluations(r.Context(), generated.StudentReportEvaluationsParams{
-		StudentID: studentID, SchoolYearID: schoolYear.ID,
-	})
-	if err != nil {
-		h.logger.Error("failed to get student evaluations", "error", err)
-		httputil.InternalError(w)
-		return
-	}
-
-	// Build the subject results from averages.
-	var results []SubjectResult
-	for i := range averages {
-		result := SubjectResult{
-			Course: averages[i].SubjectName,
-			Type:   "semester_average",
-		}
-		if averages[i].FinalValue.Valid {
-			if f, fErr := averages[i].FinalValue.Float64Value(); fErr == nil {
-				result.Grade = &f.Float64
-			}
-		}
-		if averages[i].QualifierFinal.Valid {
-			s := string(averages[i].QualifierFinal.Qualifier)
-			result.Qualifier = &s
-		}
-		results = append(results, result)
-	}
-
-	// Build absence summary.
-	absenceSummary := AbsenceSummary{}
-	for i := range absences {
-		absenceSummary.Total++
-		if string(absences[i].AbsenceType) == "unexcused" {
-			absenceSummary.Unexcused++
-		} else {
-			absenceSummary.Excused++
-		}
 	}
 
 	// Fetch external IDs from source mappings.
@@ -205,14 +136,133 @@ func (h *Handler) ExportStudent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build the start/end date for the school period.
+	// Build academic records for each school year.
+	var academicRecords []AcademicRecord
+
+	for yi := range schoolYears {
+		sy := &schoolYears[yi]
+
+		// Fetch averages (semester results).
+		averages, err := queries.StudentReportAverages(r.Context(), generated.StudentReportAveragesParams{
+			StudentID: studentID, SchoolYearID: sy.ID,
+		})
+		if err != nil {
+			h.logger.Error("failed to get averages", "error", err, "year_id", sy.ID)
+			continue
+		}
+
+		// Fetch absences.
+		absences, err := queries.StudentReportAbsences(r.Context(), generated.StudentReportAbsencesParams{
+			StudentID: studentID, SchoolYearID: sy.ID,
+		})
+		if err != nil {
+			h.logger.Error("failed to get absences", "error", err, "year_id", sy.ID)
+			continue
+		}
+
+		// Fetch grades (individual marks, not just averages).
+		grades, err := queries.StudentReportGrades(r.Context(), generated.StudentReportGradesParams{
+			StudentID: studentID, SchoolYearID: sy.ID,
+		})
+		if err != nil {
+			h.logger.Error("failed to get grades", "error", err, "year_id", sy.ID)
+			continue
+		}
+
+		// Fetch descriptive evaluations (primary school).
+		evals, err := queries.StudentReportEvaluations(r.Context(), generated.StudentReportEvaluationsParams{
+			StudentID: studentID, SchoolYearID: sy.ID,
+		})
+		if err != nil {
+			h.logger.Error("failed to get evaluations", "error", err, "year_id", sy.ID)
+			continue
+		}
+
+		// Skip school years with no data for this student.
+		if len(averages) == 0 && len(grades) == 0 && len(absences) == 0 && len(evals) == 0 {
+			continue
+		}
+
+		// Build subject results from averages.
+		var results []SubjectResult
+		for i := range averages {
+			result := SubjectResult{
+				Course: averages[i].SubjectName,
+				Type:   "semester_average",
+			}
+			if averages[i].FinalValue.Valid {
+				if f, fErr := averages[i].FinalValue.Float64Value(); fErr == nil {
+					result.Grade = &f.Float64
+				}
+			}
+			if averages[i].QualifierFinal.Valid {
+				s := string(averages[i].QualifierFinal.Qualifier)
+				result.Qualifier = &s
+			}
+			results = append(results, result)
+		}
+
+		// Add individual grade results (not just averages).
+		for i := range grades {
+			result := SubjectResult{
+				Course: grades[i].SubjectName,
+				Type:   "grade",
+			}
+			if grades[i].IsThesis {
+				result.Type = "thesis"
+			}
+			if grades[i].NumericGrade != nil {
+				f := float64(*grades[i].NumericGrade)
+				result.Grade = &f
+			}
+			if grades[i].QualifierGrade.Valid {
+				s := string(grades[i].QualifierGrade.Qualifier)
+				result.Qualifier = &s
+			}
+			results = append(results, result)
+		}
+
+		// Add descriptive evaluations.
+		for i := range evals {
+			q := evals[i].Content
+			results = append(results, SubjectResult{
+				Course:    evals[i].SubjectName,
+				Type:      "descriptive_evaluation",
+				Qualifier: &q,
+			})
+		}
+
+		// Build absence summary.
+		absenceSummary := AbsenceSummary{}
+		for i := range absences {
+			absenceSummary.Total++
+			if string(absences[i].AbsenceType) == "unexcused" {
+				absenceSummary.Unexcused++
+			} else {
+				absenceSummary.Excused++
+			}
+		}
+
+		academicRecords = append(academicRecords, AcademicRecord{
+			SchoolYear: sy.Label,
+			Results:    results,
+			Absences:   absenceSummary,
+		})
+	}
+
+	// Build the period from the earliest and latest school years.
 	startDate := ""
 	endDate := ""
-	if schoolYear.StartDate.Valid {
-		startDate = schoolYear.StartDate.Time.Format("2006-01-02")
-	}
-	if schoolYear.EndDate.Valid {
-		endDate = schoolYear.EndDate.Time.Format("2006-01-02")
+	if len(schoolYears) > 0 {
+		// schoolYears is sorted DESC by start_date, so last is earliest.
+		oldest := schoolYears[len(schoolYears)-1]
+		newest := schoolYears[0]
+		if oldest.StartDate.Valid {
+			startDate = oldest.StartDate.Time.Format("2006-01-02")
+		}
+		if newest.EndDate.Valid {
+			endDate = newest.EndDate.Time.Format("2006-01-02")
+		}
 	}
 
 	// Assemble the package.
@@ -242,21 +292,10 @@ func (h *Handler) ExportStudent(w http.ResponseWriter, r *http.Request) {
 					From: startDate,
 					To:   endDate,
 				},
-				Records: []AcademicRecord{
-					{
-						SchoolYear: schoolYear.Label,
-						Semester:   "I",
-						Results:    results,
-						Absences:   absenceSummary,
-					},
-				},
+				Records: academicRecords,
 			},
 		},
 	}
-
-	// Include grade count for context.
-	_ = grades
-	_ = evals
 
 	httputil.Success(w, pkg)
 }
@@ -306,9 +345,35 @@ func (h *Handler) ImportStudent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for duplicate: if a student with this sourcedId was already imported,
+	// return the existing user instead of creating a duplicate.
+	if pkg.Student.SourcedID != "" {
+		existing, err := queries.GetSourceMappingByExternalID(r.Context(), generated.GetSourceMappingByExternalIDParams{
+			SourceSystem: "portability",
+			SourceID:     pkg.Student.SourcedID,
+			EntityType:   "user",
+		})
+		if err == nil {
+			// Already imported — return the existing user info.
+			httputil.Success(w, map[string]any{
+				"user_id":     existing.EntityID,
+				"status":      "already_imported",
+				"source_id":   existing.SourceID,
+				"imported_at": existing.CreatedAt,
+			})
+			return
+		}
+		// pgx.ErrNoRows means not found — proceed with import.
+	}
+
 	// Provision the student in the receiving school.
 	// The academic history from the sending school is stored as source metadata.
-	historyJSON, _ := json.Marshal(pkg.SchoolHistory)
+	historyJSON, err := json.Marshal(pkg.SchoolHistory)
+	if err != nil {
+		h.logger.Error("failed to marshal school history", "error", err)
+		httputil.InternalError(w)
+		return
+	}
 
 	activationToken := uuid.New().String()
 	syntheticEmail := "transfer-" + uuid.New().String()[:8] + "@portability.import"
