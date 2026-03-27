@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -39,18 +40,22 @@ func NewHandler(queries *generated.Queries, logger *slog.Logger) *Handler {
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		slog.Warn("failed to write JSON response", "error", err)
+	}
 }
 
 // writeError writes a OneRoster-compliant error response.
 func writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"errors": []map[string]string{
 			{"description": message},
 		},
-	})
+	}); err != nil {
+		slog.Warn("failed to write error JSON response", "error", err)
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -473,6 +478,7 @@ func mapRole(role string) RoleType {
 	case "admin", "secretary":
 		return RoleAdmin
 	default:
+		slog.Warn("unknown role in OneRoster mapping, defaulting to student", "role", role)
 		return RoleStudent
 	}
 }
