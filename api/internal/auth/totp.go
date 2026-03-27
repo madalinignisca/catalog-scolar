@@ -44,15 +44,20 @@ import (
 
 // getTOTPEncryptionKey reads the TOTP encryption key from the environment.
 // Returns nil if the key is not configured (plaintext fallback for development).
+// Panics if the key is set but invalid — this is a critical configuration error
+// that must be caught at startup, not silently ignored.
 func getTOTPEncryptionKey() []byte {
 	hexKey := os.Getenv("TOTP_ENCRYPTION_KEY")
 	if hexKey == "" {
+		// No key configured — dev mode, plaintext fallback.
 		return nil
 	}
 	key, err := ParseEncryptionKey(hexKey)
 	if err != nil {
-		slog.Error("invalid TOTP_ENCRYPTION_KEY", "error", err)
-		return nil
+		// Key is set but malformed — fail fast. This is a critical config error:
+		// silently falling back to plaintext would store secrets unencrypted
+		// while the operator believes encryption is active.
+		panic(fmt.Sprintf("FATAL: invalid TOTP_ENCRYPTION_KEY: %v", err))
 	}
 	return key
 }
