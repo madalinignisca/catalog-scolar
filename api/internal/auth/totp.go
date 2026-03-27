@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -40,6 +41,66 @@ import (
 
 	"github.com/vlahsh/catalogro/api/db/generated"
 )
+
+// getTOTPEncryptionKey reads the TOTP encryption key from the environment.
+// Returns nil if the key is not configured (plaintext fallback for development).
+// Panics if the key is set but invalid — this is a critical configuration error
+// that must be caught at startup, not silently ignored.
+func getTOTPEncryptionKey() []byte {
+	hexKey := os.Getenv("TOTP_ENCRYPTION_KEY")
+	if hexKey == "" {
+		// No key configured — dev mode, plaintext fallback.
+		return nil
+	}
+	key, err := ParseEncryptionKey(hexKey)
+	if err != nil {
+		// Key is set but malformed — fail fast. This is a critical config error:
+		// silently falling back to plaintext would store secrets unencrypted
+		// while the operator believes encryption is active.
+		panic(fmt.Sprintf("FATAL: invalid TOTP_ENCRYPTION_KEY: %v", err))
+	}
+	return key
+}
+
+// encryptTOTPSecret encrypts a base32 TOTP secret using the configured
+// encryption key. If no key is configured, returns the plaintext bytes
+// (development fallback).
+func encryptTOTPSecret(secret string) ([]byte, error) {
+	key := getTOTPEncryptionKey()
+	if key == nil {
+		// No encryption key configured — store plaintext (development only).
+		slog.Warn("TOTP_ENCRYPTION_KEY not set — storing TOTP secret as plaintext")
+		return []byte(secret), nil
+	}
+	return EncryptAESGCM([]byte(secret), key)
+}
+
+// decryptTOTPSecret decrypts an encrypted TOTP secret from the database.
+// If no encryption key is configured, assumes the secret is plaintext.
+// Also handles legacy plaintext secrets: if decryption fails and the data
+// looks like valid base32, returns it as-is (migration period).
+func decryptTOTPSecret(encrypted []byte) (string, error) {
+	key := getTOTPEncryptionKey()
+	if key == nil {
+		// No encryption key — assume plaintext.
+		return string(encrypted), nil
+	}
+
+	plaintext, err := DecryptAESGCM(encrypted, key)
+	if err != nil {
+		// Decryption failed — check if it's a legacy plaintext base32 secret.
+		// This allows a graceful migration: old plaintext secrets still work,
+		// and they'll be re-encrypted on the next 2FA setup/verify.
+		upper := strings.ToUpper(string(encrypted))
+		if _, decErr := base32.StdEncoding.DecodeString(upper); decErr == nil {
+			slog.Warn("TOTP secret appears to be legacy plaintext — using as-is",
+				"len", len(encrypted))
+			return upper, nil
+		}
+		return "", fmt.Errorf("decrypt TOTP secret: %w", err)
+	}
+	return string(plaintext), nil
+}
 
 // =============================================================================
 // Request types for 2FA endpoints
@@ -119,23 +180,24 @@ func HandleMFALogin(db *generated.Queries, jwtSecret []byte) http.HandlerFunc {
 		}
 
 		// Step 4: Validate the TOTP code.
-		// The TOTP secret is stored encrypted in the database (users.totp_secret is []byte).
-		// For the POC, if the secret is empty/nil, we accept any valid 6-digit code.
-		// In production, the secret would be decrypted using TOTP_ENCRYPTION_KEY.
+		// The TOTP secret is stored encrypted in the database (AES-256-GCM).
+		// We decrypt it here using TOTP_ENCRYPTION_KEY before validation.
 		totpValid := false
 
 		if len(user.TotpSecret) > 0 {
-			// User has a TOTP secret configured — validate the code against it.
-			// The totp.Validate function handles the time window (typically accepts
-			// codes from -1/+1 time step to account for clock skew).
-			totpValid = totp.Validate(req.TOTPCode, string(user.TotpSecret))
-		} else if len(req.TOTPCode) == 6 {
-			// POC fallback: no TOTP secret stored yet. Accept any 6-digit numeric code.
-			// This allows testing the 2FA flow without setting up an authenticator app.
-			// SECURITY: Remove this fallback before production launch!
-			slog.Warn("2fa login: accepting TOTP code without secret (POC mode)",
-				"user_id", userID)
-			totpValid = true
+			// Decrypt the stored TOTP secret.
+			decryptedSecret, err := decryptTOTPSecret(user.TotpSecret)
+			if err != nil {
+				slog.Error("2fa login: failed to decrypt TOTP secret",
+					"user_id", userID, "error", err)
+				writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+					"Failed to validate 2FA. Contact support.")
+				return
+			}
+			// Validate the TOTP code against the decrypted secret.
+			// totp.Validate handles the time window (accepts codes from
+			// -1/+1 time step to account for clock skew).
+			totpValid = totp.Validate(req.TOTPCode, decryptedSecret)
 		}
 
 		if !totpValid {
@@ -383,13 +445,20 @@ func Handle2FAVerify() http.HandlerFunc {
 			return
 		}
 
-		// Step 4: Persist the secret and enable 2FA for this user.
+		// Step 4: Encrypt and persist the secret, then enable 2FA for this user.
 		// SetTOTPSecret runs: UPDATE users SET totp_secret=$2, totp_enabled=true WHERE id=$1
-		// We store the secret as raw bytes (the base32 string). In production,
-		// this should be encrypted with the TOTP_ENCRYPTION_KEY env var before storage.
+		// The secret is encrypted with AES-256-GCM using TOTP_ENCRYPTION_KEY before storage.
+		// If the key is not configured (development), it falls back to plaintext with a warning.
+		encryptedSecret, err := encryptTOTPSecret(secretUpper)
+		if err != nil {
+			slog.Error("2fa verify: failed to encrypt TOTP secret", "user_id", userID, "error", err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to enable 2FA")
+			return
+		}
+
 		if err := db.SetTOTPSecret(r.Context(), generated.SetTOTPSecretParams{
 			ID:         userID,
-			TotpSecret: []byte(secretUpper),
+			TotpSecret: encryptedSecret,
 		}); err != nil {
 			slog.Error("2fa verify: failed to save TOTP secret", "user_id", userID, "error", err)
 			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to enable 2FA")
