@@ -100,7 +100,9 @@ func run() error {
 		return fmt.Errorf("setup river: %w", err)
 	}
 	defer func() {
-		_ = riverClient.Stop(context.Background())
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = riverClient.Stop(stopCtx)
 	}()
 
 	// =========================================================================

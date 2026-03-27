@@ -59,6 +59,10 @@ func SetupRiver(ctx context.Context, pool *pgxpool.Pool, workers *river.Workers,
 	logger.Info("river migrations applied")
 
 	// Step 2: Create the River client.
+	// Default concurrency for the job worker pool. 5 workers is a reasonable
+	// default for a school catalog (low-volume, mostly notifications and reports).
+	const defaultMaxWorkers = 5
+
 	riverClient, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		// Workers is the registry of job types this client can process.
 		// Each worker handles one job type (e.g., "report_pdf", "email_send").
@@ -69,7 +73,7 @@ func SetupRiver(ctx context.Context, pool *pgxpool.Pool, workers *river.Workers,
 		// added later for priority management (e.g., "email" with higher
 		// concurrency, "pdf" with lower to avoid memory pressure).
 		Queues: map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: 5},
+			river.QueueDefault: {MaxWorkers: defaultMaxWorkers},
 		},
 
 		// Logger bridges River's internal logging to our structured logger.
@@ -83,7 +87,7 @@ func SetupRiver(ctx context.Context, pool *pgxpool.Pool, workers *river.Workers,
 	if err := riverClient.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start river client: %w", err)
 	}
-	logger.Info("river job queue started", "workers", 5)
+	logger.Info("river job queue started", "workers", defaultMaxWorkers)
 
 	return riverClient, nil
 }
