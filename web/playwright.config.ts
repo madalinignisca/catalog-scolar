@@ -121,16 +121,46 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
 
-  // ── Browser projects ──────────────────────────────────────────────────────
+  // ── Projects with execution ordering ──────────────────────────────────────
   /**
-   * projects: each entry runs the entire test suite in a different browser.
-   * We only run Chromium to keep CI fast and the setup minimal.
-   * Firefox / WebKit can be added later if cross-browser coverage is needed.
+   * Tests are split into two project phases to solve the data mutation
+   * ordering problem:
+   *
+   *  Phase 1 — "display": Read-only tests that assert against seed data.
+   *     These run FIRST and must see the original seed state.
+   *     Includes: grade-grid, dashboard, navigation, auth, error tests.
+   *
+   *  Phase 2 — "mutations": Tests that create/update/delete data.
+   *     These run AFTER display tests, so mutations don't corrupt seed state.
+   *     Includes: grade-crud, grade-edge-cases, sync, admin tests.
+   *
+   * The `dependencies` field ensures Phase 1 completes before Phase 2 starts.
+   * Within each phase, tests run sequentially (workers: 1).
    */
   projects: [
     {
-      name: 'chromium',
+      name: 'display',
       use: { ...devices['Desktop Chrome'] },
+      testMatch: [
+        '**/auth/**',
+        '**/dashboard/**',
+        '**/navigation/**',
+        '**/error/**',
+        '**/catalog/grade-grid.spec.ts',
+        '**/catalog/navigation.spec.ts',
+      ],
+    },
+    {
+      name: 'mutations',
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['display'],
+      testMatch: [
+        '**/catalog/grade-crud.spec.ts',
+        '**/catalog/grade-edge-cases.spec.ts',
+        '**/sync/**',
+        '**/admin/**',
+        '**/edge/**',
+      ],
     },
   ],
 
