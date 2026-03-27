@@ -71,9 +71,27 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   };
 
   if (!options.skipAuth) {
+    // Client-side: add Bearer token from localStorage as fallback.
+    // The httpOnly cookie is sent automatically via credentials: 'include',
+    // but the Authorization header is kept for non-browser clients.
     const token = getAccessToken();
     if (token !== null && token !== '') {
       headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    // SSR: forward the cookie header from the incoming Nuxt request so that
+    // httpOnly auth cookies reach the API. Without this, SSR requests have
+    // no auth context (localStorage is unavailable server-side).
+    if (!import.meta.client) {
+      try {
+        const reqHeaders = useRequestHeaders(['cookie']);
+        if (reqHeaders.cookie !== undefined && reqHeaders.cookie !== '') {
+          headers['Cookie'] = reqHeaders.cookie;
+        }
+      } catch {
+        // useRequestHeaders only works inside a Nuxt request context.
+        // Outside of that (e.g., build-time), silently skip.
+      }
     }
   }
 
@@ -81,6 +99,9 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     method: options.method ?? 'GET',
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    // Send httpOnly cookies with every request. The API sets auth cookies
+    // alongside JSON tokens, enabling SSR auth without localStorage.
+    credentials: 'include',
   });
 
   // Token expired — try refresh
@@ -149,16 +170,40 @@ function snakeToCamel(data: unknown): unknown {
 }
 
 async function tryRefreshToken(): Promise<boolean> {
-  if (!import.meta.client) return false;
-  const refreshToken = localStorage.getItem(REFRESH_KEY);
-  if (refreshToken === null || refreshToken === '') return false;
+  const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  let refreshToken: string | null = null;
+
+  if (import.meta.client) {
+    // Client-side: use refresh token from localStorage.
+    refreshToken = localStorage.getItem(REFRESH_KEY);
+    if (refreshToken === null || refreshToken === '') {
+      return false;
+    }
+  } else {
+    // SSR: forward cookies from the incoming request. The API will use the
+    // httpOnly refresh_token cookie.
+    try {
+      const incoming = useRequestHeaders(['cookie']);
+      if (incoming.cookie !== undefined && incoming.cookie !== '') {
+        reqHeaders['Cookie'] = incoming.cookie;
+      } else {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
 
   try {
     const base = getApiBase();
     const response = await fetch(`${base}/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      headers: reqHeaders,
+      body:
+        refreshToken !== null && refreshToken !== ''
+          ? JSON.stringify({ refresh_token: refreshToken })
+          : '{}',
+      credentials: 'include',
     });
 
     if (!response.ok) return false;
