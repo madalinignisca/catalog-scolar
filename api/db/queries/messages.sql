@@ -17,13 +17,16 @@ INSERT INTO message_recipients (school_id, message_id, recipient_id)
 VALUES (current_school_id(), $1, $2);
 
 -- name: GetMessageByID :one
--- Returns a single message by its ID.
+-- Returns a single message by its ID, but only if the requesting user
+-- is the sender or a recipient. Prevents unauthorized access to messages.
 SELECT m.*,
     u.first_name AS sender_first_name,
     u.last_name AS sender_last_name
 FROM messages m
 JOIN users u ON u.id = m.sender_id
-WHERE m.id = $1;
+LEFT JOIN message_recipients mr ON mr.message_id = m.id AND mr.recipient_id = $2
+WHERE m.id = $1
+    AND (m.sender_id = $2 OR mr.recipient_id = $2);
 
 -- name: ListMessagesForUser :many
 -- Returns all messages where the user is a recipient, ordered by newest first.

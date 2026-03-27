@@ -116,8 +116,9 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // GetMessage handles GET /messages/{messageId}.
+// Only the sender or a recipient can view a message.
 func (h *Handler) GetMessage(w http.ResponseWriter, r *http.Request) {
-	_, err := auth.GetUserID(r.Context())
+	userID, err := auth.GetUserID(r.Context())
 	if err != nil {
 		httputil.Unauthorized(w, "Authentication required")
 		return
@@ -135,7 +136,11 @@ func (h *Handler) GetMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := queries.GetMessageByID(r.Context(), messageID)
+	// The query enforces that the requesting user is either the sender or a recipient.
+	msg, err := queries.GetMessageByID(r.Context(), generated.GetMessageByIDParams{
+		ID:          messageID,
+		RecipientID: userID,
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httputil.NotFound(w, "Message not found")
