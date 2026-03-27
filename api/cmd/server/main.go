@@ -34,6 +34,7 @@ import (
 	"github.com/vlahsh/catalogro/api/internal/config"
 	"github.com/vlahsh/catalogro/api/internal/platform"
 	"github.com/vlahsh/catalogro/api/internal/interop"
+	"github.com/vlahsh/catalogro/api/internal/interop/oneroster"
 	"github.com/vlahsh/catalogro/api/internal/report"
 	"github.com/vlahsh/catalogro/api/internal/school"
 	"github.com/vlahsh/catalogro/api/internal/user"
@@ -113,6 +114,9 @@ func run() error {
 
 	// interopHandler manages SIIIR import/export and source mappings.
 	interopHandler := interop.NewHandler(queries, logger)
+
+	// oneRosterHandler serves the OneRoster 1.2 read-only API.
+	oneRosterHandler := oneroster.NewHandler(queries, logger)
 
 	// userHandler manages user provisioning: creating accounts, listing users,
 	// and listing accounts awaiting activation. Restricted to admin and secretary
@@ -422,17 +426,19 @@ func run() error {
 			// TODO: add API key auth middleware
 			// r.Use(auth.APIKeyMiddleware())
 
-			r.Get("/oneroster/orgs", notImplemented)
-			r.Get("/oneroster/orgs/{sourcedId}", notImplemented)
-			r.Get("/oneroster/users", notImplemented)
-			r.Get("/oneroster/users/{sourcedId}", notImplemented)
-			r.Get("/oneroster/classes", notImplemented)
-			r.Get("/oneroster/classes/{sourcedId}/students", notImplemented)
-			r.Get("/oneroster/courses", notImplemented)
-			r.Get("/oneroster/enrollments", notImplemented)
-			r.Get("/oneroster/academicSessions", notImplemented)
-			r.Get("/oneroster/lineItems", notImplemented)
-			r.Get("/oneroster/results", notImplemented)
+			// OneRoster 1.2 Rostering endpoints
+			r.Get("/oneroster/orgs", oneRosterHandler.ListOrgs)
+			r.Get("/oneroster/orgs/{sourcedId}", oneRosterHandler.GetOrg)
+			r.Get("/oneroster/users", oneRosterHandler.ListUsers)
+			r.Get("/oneroster/users/{sourcedId}", oneRosterHandler.GetUser)
+			r.Get("/oneroster/classes", oneRosterHandler.ListClasses)
+			r.Get("/oneroster/classes/{sourcedId}/students", oneRosterHandler.ListClassStudents)
+			r.Get("/oneroster/courses", oneRosterHandler.ListCourses)
+			r.Get("/oneroster/enrollments", oneRosterHandler.ListEnrollments)
+			r.Get("/oneroster/academicSessions", oneRosterHandler.ListAcademicSessions)
+			// OneRoster 1.2 Gradebook endpoints (stubs — full impl requires line item mapping)
+			r.Get("/oneroster/lineItems", oneRosterHandler.ListLineItems)
+			r.Get("/oneroster/results", oneRosterHandler.ListResults)
 		})
 	})
 
