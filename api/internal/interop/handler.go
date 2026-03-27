@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -51,14 +50,10 @@ import (
 
 // Handler holds the dependencies needed by interop HTTP handlers.
 type Handler struct {
-	queries     *generated.Queries
-	logger      *slog.Logger
-	riverClient RiverInserter
-
-	// importSessions stores in-progress imports by ID.
-	// In production this should be Redis-backed; in-memory is fine for MVP.
-	mu       sync.RWMutex
-	sessions map[uuid.UUID]*importSession
+	queries      *generated.Queries
+	logger       *slog.Logger
+	riverClient  RiverInserter
+	sessionStore *SessionStore
 }
 
 // RiverInserter is the interface for inserting River jobs. Allows mocking in tests.
@@ -66,25 +61,16 @@ type RiverInserter interface {
 	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
 }
 
-// importSession holds the state of an in-progress SIIIR import.
-type importSession struct {
-	ID        uuid.UUID         `json:"id"`
-	Status    string            `json:"status"` // "preview", "confirmed", "completed", "failed"
-	CreatedAt time.Time         `json:"created_at"`
-	Users     []siiir.MappedUser `json:"users"`
-	Errors    []string          `json:"errors,omitempty"`
-	Imported  int               `json:"imported"`
-	Skipped   int               `json:"skipped"`
-}
 
-// NewHandler creates a new interop Handler. riverClient can be nil if
-// River is not available (async import will fall back to synchronous).
-func NewHandler(queries *generated.Queries, logger *slog.Logger, riverClient RiverInserter) *Handler {
+// NewHandler creates a new interop Handler.
+// riverClient can be nil (async import falls back to synchronous).
+// sessionStore manages import sessions in Redis.
+func NewHandler(queries *generated.Queries, logger *slog.Logger, riverClient RiverInserter, sessionStore *SessionStore) *Handler {
 	return &Handler{
-		queries:     queries,
-		logger:      logger,
-		riverClient: riverClient,
-		sessions:    make(map[uuid.UUID]*importSession),
+		queries:      queries,
+		logger:       logger,
+		riverClient:  riverClient,
+		sessionStore: sessionStore,
 	}
 }
 
@@ -177,7 +163,7 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 4: Create an import session with the preview.
-	session := &importSession{
+	session := &ImportSession{
 		ID:        uuid.New(),
 		Status:    "preview",
 		CreatedAt: time.Now(),
@@ -185,9 +171,11 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		Errors:    errors,
 	}
 
-	h.mu.Lock()
-	h.sessions[session.ID] = session
-	h.mu.Unlock()
+	if err := h.sessionStore.Save(r.Context(), session); err != nil {
+		h.logger.Error("failed to save import session", "error", err)
+		httputil.InternalError(w)
+		return
+	}
 
 	// Step 5: Return the preview (capped at 50 rows to keep response manageable).
 	const maxPreview = 50
@@ -239,24 +227,28 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Look up the import session and mark as confirmed atomically.
-	// Using a single Lock (not RLock then Lock) prevents two concurrent
-	// confirm requests from both passing the status check.
-	h.mu.Lock()
-	session, exists := h.sessions[importID]
-	if !exists {
-		h.mu.Unlock()
+	// Look up the import session from Redis.
+	session, err := h.sessionStore.Get(r.Context(), importID)
+	if err != nil {
+		h.logger.Error("failed to get import session", "error", err)
+		httputil.InternalError(w)
+		return
+	}
+	if session == nil {
 		httputil.NotFound(w, "Import session not found — it may have expired")
 		return
 	}
 	if session.Status != "preview" {
-		h.mu.Unlock()
 		httputil.BadRequest(w, "INVALID_STATUS",
 			fmt.Sprintf("Import is in '%s' state, expected 'preview'", session.Status))
 		return
 	}
 	session.Status = "confirmed"
-	h.mu.Unlock()
+	if err := h.sessionStore.Save(r.Context(), session); err != nil {
+		h.logger.Error("failed to update session status", "error", err)
+		httputil.InternalError(w)
+		return
+	}
 
 	// Get the current user ID for provisioned_by tracking.
 	currentUserID, _ := auth.GetUserID(r.Context())
@@ -276,9 +268,8 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.mu.Lock()
 		session.Status = "processing"
-		h.mu.Unlock()
+		_ = h.sessionStore.Save(r.Context(), session)
 
 		httputil.Success(w, map[string]any{
 			"import_id": importID,
@@ -328,15 +319,14 @@ func (h *Handler) ConfirmImport(w http.ResponseWriter, r *http.Request) {
 		imported++
 	}
 
-	// Update session status.
-	h.mu.Lock()
+	// Update session status in Redis.
 	session.Status = "completed"
 	session.Imported = imported
 	session.Skipped = skipped
 	if len(importErrors) > 0 {
 		session.Errors = append(session.Errors, importErrors...)
 	}
-	h.mu.Unlock()
+	_ = h.sessionStore.Save(r.Context(), session)
 
 	httputil.Success(w, map[string]any{
 		"import_id": importID,
@@ -365,12 +355,14 @@ func (h *Handler) ImportStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.RLock()
-	session, exists := h.sessions[importID]
-	h.mu.RUnlock()
-
-	if !exists {
-		httputil.NotFound(w, "Import session not found")
+	session, err := h.sessionStore.Get(r.Context(), importID)
+	if err != nil {
+		h.logger.Error("failed to get import session", "error", err)
+		httputil.InternalError(w)
+		return
+	}
+	if session == nil {
+		httputil.NotFound(w, "Import session not found or expired")
 		return
 	}
 

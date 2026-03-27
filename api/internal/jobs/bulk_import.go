@@ -35,21 +35,23 @@ func (BulkImportArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: river.QueueDefault}
 }
 
+// SessionUpdater allows the worker to update import session status in Redis.
+type SessionUpdater interface {
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string, imported, skipped int, errors []string) error
+}
+
 // BulkImportWorker processes async bulk import jobs.
 type BulkImportWorker struct {
 	river.WorkerDefaults[BulkImportArgs]
-	Queries *generated.Queries
-	Logger  *slog.Logger
+	Queries        *generated.Queries
+	Logger         *slog.Logger
+	SessionUpdater SessionUpdater
 }
 
 // Work provisions each user in the batch, creating source mappings for
 // traceability. Individual failures are logged but don't abort the batch.
-//
-// KNOWN LIMITATION: The import session status (in-memory in interop.Handler)
-// cannot be updated from this worker because they run in separate contexts.
-// The session will remain in "processing" state. This is tracked in issue #79
-// (Redis-backed import sessions) which will move session state to a shared
-// persistent store accessible by both the handler and the worker.
+// After completion, updates the Redis-backed session status so the client
+// can see the result via the /status endpoint.
 func (w *BulkImportWorker) Work(ctx context.Context, job *river.Job[BulkImportArgs]) error {
 	// Fail fast if the provisioned_by user ID is missing.
 	if job.Args.ProvisionedBy == uuid.Nil {
@@ -107,6 +109,13 @@ func (w *BulkImportWorker) Work(ctx context.Context, job *river.Job[BulkImportAr
 		"skipped", skipped,
 		"job_id", job.ID,
 	)
+
+	// Update the Redis session status so the client can see the result.
+	if w.SessionUpdater != nil {
+		if err := w.SessionUpdater.UpdateStatus(ctx, job.Args.ImportID, "completed", imported, skipped, nil); err != nil {
+			w.Logger.Warn("failed to update import session status", "error", err)
+		}
+	}
 
 	return nil
 }

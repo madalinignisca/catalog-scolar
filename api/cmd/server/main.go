@@ -94,7 +94,10 @@ func run() error {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &jobs.NotificationWorker{Logger: logger})
 	river.AddWorker(workers, &jobs.ReportWorker{Logger: logger})
-	river.AddWorker(workers, &jobs.BulkImportWorker{Queries: generated.New(db.Pool), Logger: logger})
+	sessionStore := interop.NewSessionStore(rdb.Client)
+	river.AddWorker(workers, &jobs.BulkImportWorker{
+		Queries: generated.New(db.Pool), Logger: logger, SessionUpdater: sessionStore,
+	})
 
 	riverClient, err := platform.SetupRiver(context.Background(), db.Pool, workers, logger)
 	if err != nil {
@@ -139,7 +142,7 @@ func run() error {
 	reportHandler := report.NewHandler(queries, logger)
 
 	// interopHandler manages SIIIR import/export and source mappings.
-	interopHandler := interop.NewHandler(queries, logger, riverClient)
+	interopHandler := interop.NewHandler(queries, logger, riverClient, sessionStore)
 
 	// messagingHandler manages teacher-parent messaging and announcements.
 	messagingHandler := messaging.NewHandler(queries, logger)
