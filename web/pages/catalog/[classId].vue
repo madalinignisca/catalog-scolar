@@ -184,7 +184,7 @@ function selectSemester(semester: Semester): void {
   <!-- LOADING STATE                                                      -->
   <!-- Shown while the class and subject data is being fetched.           -->
   <!-- ================================================================== -->
-  <div data-testid="catalog-loading" v-if="isLoading" class="space-y-4">
+  <div v-if="isLoading" data-testid="catalog-loading" class="space-y-4">
     <div class="h-8 w-48 animate-pulse rounded bg-gray-200" />
     <div class="h-6 w-32 animate-pulse rounded bg-gray-200" />
     <div class="flex gap-2">
@@ -293,9 +293,9 @@ function selectSemester(semester: Semester): void {
     <div v-if="subjects.length > 0" class="border-b border-gray-200">
       <nav class="-mb-px flex space-x-1 overflow-x-auto" role="tablist">
         <button
-          data-testid="subject-tab"
           v-for="subject in subjects"
           :key="subject.id"
+          data-testid="subject-tab"
           type="button"
           role="tab"
           :aria-selected="activeSubjectId === subject.id"
@@ -331,7 +331,7 @@ function selectSemester(semester: Semester): void {
     <!-- The main grade table component, shown for the active subject.  -->
     <!-- It watches classId, subjectId, and semester and auto-refetches -->
     <!-- when any of them change.                                       -->
-    <div data-testid="grade-grid-container" v-if="activeSubjectId !== null">
+    <div v-if="activeSubjectId !== null" data-testid="grade-grid-container">
       <!-- Subject header: name and thesis indicator -->
       <div v-if="activeSubject !== null" class="mb-2 flex items-center gap-2">
         <h2 class="text-lg font-semibold text-gray-800">

@@ -128,8 +128,8 @@ const roleLabels: Record<string, string> = {
     <!-- Clicking the overlay closes the sidebar.                           -->
     <!-- ================================================================== -->
     <button
-      data-testid="sidebar-overlay"
       v-if="isSidebarOpen"
+      data-testid="sidebar-overlay"
       type="button"
       aria-label="Închide meniul"
       class="fixed inset-0 z-30 cursor-default border-none bg-black/50 lg:hidden"
@@ -176,9 +176,9 @@ const roleLabels: Record<string, string> = {
       <!-- Navigation links -->
       <nav class="flex-1 space-y-1 px-3 py-4">
         <NuxtLink
-          data-testid="nav-item"
           v-for="item in navItems"
           :key="item.label"
+          data-testid="nav-item"
           :to="item.to"
           class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
           active-class="bg-blue-50 text-blue-700"

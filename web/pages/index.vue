@@ -191,8 +191,8 @@ function openClass(classItem: TeacherClass): void {
   <!-- LOADING STATE: shown while fetchProfile is in progress             -->
   <!-- ================================================================== -->
   <div
-    data-testid="dashboard-loading"
     v-if="pageLoading"
+    data-testid="dashboard-loading"
     class="flex items-center justify-center py-20"
   >
     <div class="text-center">
@@ -207,7 +207,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- TEACHER DASHBOARD                                                  -->
   <!-- Shows a grid of class cards when the user is a teacher.            -->
   <!-- ================================================================== -->
-  <div data-testid="dashboard-content" v-else-if="user?.role === 'teacher'" class="space-y-6">
+  <div v-else-if="user?.role === 'teacher'" data-testid="dashboard-content" class="space-y-6">
     <!-- Page heading -->
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Tablou de bord</h1>
@@ -216,8 +216,8 @@ function openClass(classItem: TeacherClass): void {
 
     <!-- Error banner: shown if the class list failed to load -->
     <div
-      data-testid="dashboard-error"
       v-if="error !== null && error !== ''"
+      data-testid="dashboard-error"
       class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
     >
       {{ error }}
@@ -238,8 +238,8 @@ function openClass(classItem: TeacherClass): void {
 
     <!-- Empty state: no classes assigned to this teacher -->
     <div
-      data-testid="empty-state"
       v-else-if="classes?.length === 0 && error === null"
+      data-testid="empty-state"
       class="rounded-xl border-2 border-dashed border-gray-300 p-12 text-center"
     >
       <svg
@@ -264,9 +264,9 @@ function openClass(classItem: TeacherClass): void {
     <!-- Class cards grid: one card per assigned class -->
     <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <button
-        data-testid="class-card"
         v-for="classItem in classes"
         :key="classItem.id"
+        data-testid="class-card"
         type="button"
         class="group rounded-xl border border-gray-200 bg-white p-6 text-left shadow-sm transition-all hover:border-blue-300 hover:shadow-md"
         @click="openClass(classItem)"
@@ -332,7 +332,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- ADMIN DASHBOARD                                                    -->
   <!-- Quick-access cards for school administration features.             -->
   <!-- ================================================================== -->
-  <div data-testid="dashboard-content" v-else-if="user?.role === 'admin'" class="space-y-6">
+  <div v-else-if="user?.role === 'admin'" data-testid="dashboard-content" class="space-y-6">
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Administrare școală</h1>
       <p class="mt-1 text-sm text-gray-500">Gestionați utilizatori, clase și configurări</p>
@@ -376,7 +376,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- Shows a grid of child cards when the user is a parent.            -->
   <!-- Each card displays the child's name, class, and education level.  -->
   <!-- ================================================================== -->
-  <div data-testid="dashboard-content" v-else-if="user?.role === 'parent'" class="space-y-6">
+  <div v-else-if="user?.role === 'parent'" data-testid="dashboard-content" class="space-y-6">
     <!-- Page heading -->
     <div>
       <h1 class="text-2xl font-bold text-gray-900">Copiii mei</h1>
@@ -448,9 +448,9 @@ function openClass(classItem: TeacherClass): void {
         to locate and assert on individual child cards.
       -->
       <div
-        data-testid="child-card"
         v-for="child in children"
         :key="child.id"
+        data-testid="child-card"
         class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
       >
         <!-- Child's full name: last name first, matching Romanian convention -->
@@ -483,7 +483,7 @@ function openClass(classItem: TeacherClass): void {
   <!-- ================================================================== -->
   <!-- FALLBACK: unknown or unhandled role                                -->
   <!-- ================================================================== -->
-  <div data-testid="welcome-message" v-else class="py-12 text-center text-gray-500">
+  <div v-else data-testid="welcome-message" class="py-12 text-center text-gray-500">
     <p>Bine ați venit în CatalogRO</p>
   </div>
 </template>

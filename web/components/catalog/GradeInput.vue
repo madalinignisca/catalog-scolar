@@ -293,9 +293,9 @@ function handleClose(): void {
               Notă (1-10)
             </label>
             <input
-              data-testid="grade-numeric-input"
               id="grade-numeric"
               v-model.number="numericValue"
+              data-testid="grade-numeric-input"
               type="number"
               min="1"
               max="10"
@@ -314,9 +314,9 @@ function handleClose(): void {
               Data
             </label>
             <input
-              data-testid="grade-date-input"
               id="grade-date"
               v-model="gradeDate"
+              data-testid="grade-date-input"
               type="date"
               required
               class="block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -334,9 +334,9 @@ function handleClose(): void {
               <span class="font-normal text-gray-400">(opțional)</span>
             </label>
             <input
-              data-testid="grade-description-input"
               id="grade-description"
               v-model="description"
+              data-testid="grade-description-input"
               type="text"
               placeholder="ex: Test la capitolul 3"
               class="block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -345,8 +345,8 @@ function handleClose(): void {
 
           <!-- Validation error message -->
           <div
-            data-testid="grade-validation-error"
             v-if="validationError !== ''"
+            data-testid="grade-validation-error"
             class="rounded-lg bg-red-50 p-3 text-sm text-red-700"
           >
             {{ validationError }}

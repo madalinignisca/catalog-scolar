@@ -368,22 +368,22 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
   <div class="space-y-4">
     <!-- Error banner -->
     <div
-      data-testid="grade-grid-error"
       v-if="error !== null && error !== ''"
+      data-testid="grade-grid-error"
       class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
     >
       {{ error }}
     </div>
 
     <!-- Loading skeleton for the grade table -->
-    <div data-testid="grade-grid-loading" v-if="isLoading" class="space-y-3">
+    <div v-if="isLoading" data-testid="grade-grid-loading" class="space-y-3">
       <div v-for="n in 5" :key="n" class="h-12 animate-pulse rounded-lg bg-gray-200" />
     </div>
 
     <!-- Empty state: no students in this class -->
     <div
-      data-testid="grade-grid-empty"
       v-else-if="sortedStudents.length === 0"
+      data-testid="grade-grid-empty"
       class="rounded-xl border-2 border-dashed border-gray-300 p-8 text-center"
     >
       <p class="text-sm text-gray-500">Nu există elevi înscriși în această clasă.</p>
@@ -441,9 +441,9 @@ async function handleDeleteGrade(grade: Grade): Promise<void> {
         <!-- Table body: one row per student -->
         <tbody class="divide-y divide-gray-100">
           <tr
-            data-testid="student-row"
             v-for="(student, index) in sortedStudents"
             :key="student.studentId"
+            data-testid="student-row"
             class="transition-colors hover:bg-gray-50"
           >
             <!-- Row number -->
