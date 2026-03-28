@@ -332,7 +332,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build & push API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: api
           push: true
@@ -351,7 +351,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build & push Web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: web
           push: true
