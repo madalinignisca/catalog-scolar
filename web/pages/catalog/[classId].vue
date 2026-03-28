@@ -71,6 +71,12 @@ const activeSubjectId = ref<string | null>(null);
 /** The currently selected semester */
 const activeSemester = ref<Semester>('I');
 
+/** Active view tab: 'grades' or 'evaluations' (primary classes only) */
+const activeView = ref<'grades' | 'evaluations'>('grades');
+
+/** Whether the current class is primary (shows evaluations tab) */
+const isPrimary = computed(() => currentClass.value?.educationLevel === 'primary');
+
 /** True while loading class and subject data */
 const isLoading = ref(true);
 
@@ -327,10 +333,39 @@ function selectSemester(semester: Semester): void {
       </NuxtLink>
     </div>
 
-    <!-- ── Grade grid ───────────────────────────────────────────────── -->
-    <!-- The main grade table component, shown for the active subject.  -->
-    <!-- It watches classId, subjectId, and semester and auto-refetches -->
-    <!-- when any of them change.                                       -->
+    <!-- ── View toggle (primary classes only) ──────────────────────── -->
+    <!-- Primary classes have both grades (calificative) and descriptive -->
+    <!-- evaluations. This toggle switches between the two views.       -->
+    <div v-if="isPrimary && activeSubjectId !== null" class="flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+      <button
+        data-testid="view-grades"
+        type="button"
+        :class="[
+          'rounded-md px-4 py-2 text-sm font-medium transition-colors',
+          activeView === 'grades'
+            ? 'bg-blue-600 text-white shadow-sm'
+            : 'text-gray-600 hover:bg-gray-50',
+        ]"
+        @click="activeView = 'grades'"
+      >
+        Calificative
+      </button>
+      <button
+        data-testid="view-evaluations"
+        type="button"
+        :class="[
+          'rounded-md px-4 py-2 text-sm font-medium transition-colors',
+          activeView === 'evaluations'
+            ? 'bg-blue-600 text-white shadow-sm'
+            : 'text-gray-600 hover:bg-gray-50',
+        ]"
+        @click="activeView = 'evaluations'"
+      >
+        Evaluări descriptive
+      </button>
+    </div>
+
+    <!-- ── Content area ─────────────────────────────────────────────── -->
     <div v-if="activeSubjectId !== null" data-testid="grade-grid-container">
       <!-- Subject header: name and thesis indicator -->
       <div v-if="activeSubject !== null" class="mb-2 flex items-center gap-2">
@@ -345,8 +380,17 @@ function selectSemester(semester: Semester): void {
         </span>
       </div>
 
-      <!-- The GradeGrid component handles all the grade display + CRUD -->
+      <!-- Descriptive evaluations view (primary classes only) -->
+      <CatalogEvaluationList
+        v-if="isPrimary && activeView === 'evaluations'"
+        :class-id="classId"
+        :subject-id="activeSubjectId"
+        :semester="activeSemester"
+      />
+
+      <!-- Grade grid view (all classes, or primary when on 'grades' tab) -->
       <CatalogGradeGrid
+        v-else
         :class-id="classId"
         :subject-id="activeSubjectId"
         :semester="activeSemester"
