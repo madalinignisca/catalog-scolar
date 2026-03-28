@@ -336,7 +336,10 @@ function selectSemester(semester: Semester): void {
     <!-- ── View toggle (primary classes only) ──────────────────────── -->
     <!-- Primary classes have both grades (calificative) and descriptive -->
     <!-- evaluations. This toggle switches between the two views.       -->
-    <div v-if="isPrimary && activeSubjectId !== null" class="flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+    <div
+      v-if="isPrimary && activeSubjectId !== null"
+      class="flex rounded-lg border border-gray-200 bg-white p-1 shadow-sm"
+    >
       <button
         data-testid="view-grades"
         type="button"

@@ -136,10 +136,7 @@ async function save(studentId: string): Promise<void> {
         <h3 class="font-medium text-gray-900" data-testid="evaluation-student-name">
           {{ item.student.lastName }} {{ item.student.firstName }}
         </h3>
-        <span
-          v-if="savedStudentId === item.student.id"
-          class="text-xs font-medium text-green-600"
-        >
+        <span v-if="savedStudentId === item.student.id" class="text-xs font-medium text-green-600">
           Salvat
         </span>
         <span
@@ -189,7 +186,7 @@ async function save(studentId: string): Promise<void> {
         <p
           v-if="item.evaluation !== null && item.evaluation !== undefined"
           data-testid="evaluation-content"
-          class="text-sm text-gray-700 whitespace-pre-wrap"
+          class="whitespace-pre-wrap text-sm text-gray-700"
         >
           {{ item.evaluation.content }}
         </p>
