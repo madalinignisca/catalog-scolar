@@ -557,6 +557,47 @@ export function useCatalog() {
     return Math.round((sum / numericGrades.length) * 100) / 100;
   }
 
+  // ── Descriptive Evaluations ──────────────────────────────────────────────
+
+  /**
+   * Fetch descriptive evaluations for a primary class/subject/semester.
+   * Returns all students with their evaluation (or null if not written yet).
+   */
+  async function fetchEvaluations(
+    classId: string,
+    subjectId: string,
+    semester: Semester,
+  ): Promise<StudentEvaluation[]> {
+    const response = await api<{ students: StudentEvaluation[] }>(
+      `/catalog/classes/${classId}/subjects/${subjectId}/evaluations?semester=${semester}`,
+    );
+    return response.students;
+  }
+
+  /**
+   * Create or update a descriptive evaluation for a student.
+   * The API uses upsert — if an evaluation already exists for this
+   * student/subject/semester, it updates the content.
+   */
+  async function saveEvaluation(params: {
+    studentId: string;
+    classId: string;
+    subjectId: string;
+    semester: Semester;
+    content: string;
+  }): Promise<DescriptiveEvaluation> {
+    return api<DescriptiveEvaluation>('/catalog/evaluations', {
+      method: 'POST',
+      body: {
+        student_id: params.studentId,
+        class_id: params.classId,
+        subject_id: params.subjectId,
+        semester: params.semester,
+        content: params.content,
+      },
+    });
+  }
+
   return {
     /** Reactive list of teacher's classes */
     classes: readonly(classes),
@@ -584,5 +625,32 @@ export function useCatalog() {
     updateGradeInGrid,
     /** Optimistically remove a grade from the local grid */
     removeGradeFromGrid,
+    /** Fetch descriptive evaluations for primary class/subject/semester */
+    fetchEvaluations,
+    /** Create or update a descriptive evaluation */
+    saveEvaluation,
   };
+}
+
+// ── Descriptive Evaluation Types ────────────────────────────────────────────
+
+/** A student's descriptive evaluation (primary school) */
+export interface DescriptiveEvaluation {
+  id: string;
+  studentId: string;
+  teacherId: string;
+  semester: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A student with their optional evaluation from the list endpoint */
+export interface StudentEvaluation {
+  student: {
+    id: string;
+    firstName: string;
+    lastName: string;
+  };
+  evaluation: DescriptiveEvaluation | null;
 }
