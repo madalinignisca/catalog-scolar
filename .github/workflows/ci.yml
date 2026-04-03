@@ -229,15 +229,16 @@ jobs:
 
       # ── Start API server (background) ──────────────────────────────────────
       # The API server is launched in the background so the next steps can run.
-      # JWT_SECRET and TOTP_ENCRYPTION_KEY are CI-only dummy values; they only
-      # need to be non-empty strings — real secrets are never used in CI tests.
+      # JWT_SECRET needs a non-empty value for HMAC signing.
+      # TOTP_ENCRYPTION_KEY is intentionally omitted — the server falls back to
+      # plaintext mode (dev), which matches the seed data's unencrypted TOTP secrets.
+      # Setting an invalid key would cause a startup panic (fail-fast validation).
       - name: Start API server
         working-directory: api
         env:
           DATABASE_URL: postgres://catalogro:catalogro@localhost:5432/catalogro?sslmode=disable
           REDIS_URL: redis://localhost:6379/0
           JWT_SECRET: test-jwt-secret-for-ci-only
-          TOTP_ENCRYPTION_KEY: test-totp-key-for-ci-only
           APP_BASE_URL: http://localhost:3000
           PORT: 8080
           ENV: test
